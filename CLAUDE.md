@@ -23,23 +23,46 @@ xcodebuild test -project DeepReader/DeepReader.xcodeproj -scheme DeepReader -des
 ### Pattern: MVVM with Singleton Services
 
 ```
-DeepReader/
-├── App/                    # App entry point, ContentView
-├── Models/                 # GRDB-backed data models (Book, Highlight)
+DeepReader/DeepReader/
+├── App/
+│   ├── DeepReaderApp.swift     # @main entry point with AppState
+│   └── ContentView.swift       # Root navigation & PDF import handling
+├── Models/
+│   ├── Book.swift              # GRDB-backed Book model
+│   └── Highlight.swift         # GRDB-backed Highlight model + HighlightColor enum
 ├── Modules/
-│   ├── Library/Views/      # Book library UI
-│   └── Reader/Views/       # PDF reader UI
+│   ├── Library/Views/
+│   │   └── LibraryView.swift   # Library grid + LibraryViewModel + BookCardView
+│   └── Reader/Views/
+│       └── ReaderView.swift    # PDF reader + PDFKitView + SearchView + OutlineView + ReaderViewModel
 ├── Core/
-│   ├── Storage/            # DatabaseService, BookService
-│   └── PDF/                # PDFService (PDFKit + Vision OCR)
-└── Shared/DesignSystem/    # Typography, Spacing, Colors, Components
+│   ├── Storage/
+│   │   ├── DatabaseService.swift
+│   │   └── BookService.swift
+│   └── PDF/
+│       └── PDFService.swift
+└── Shared/DesignSystem/
+    └── DesignSystem.swift
 ```
 
 ### Key Services (Singletons)
 
-- `DatabaseService.shared` - SQLite via GRDB, handles migrations
-- `PDFService.shared` - PDF loading, text extraction, OCR, cover generation
-- `BookService.shared` - Book CRUD operations
+- `DatabaseService.shared` - SQLite via GRDB, handles migrations, text search, highlights
+- `PDFService.shared` - PDF loading, text extraction, OCR (Vision), cover generation
+- `BookService.shared` - PDF import, book CRUD, security-scoped file handling
+
+### ViewModels
+
+- `AppState` (in DeepReaderApp.swift) - App-wide state: `selectedBook`, `isShowingImporter`
+- `LibraryViewModel` (in LibraryView.swift) - Book list management
+- `ReaderViewModel` (in ReaderView.swift) - PDF document state, search, navigation
+
+### UI Components
+
+- `BookCardView` - Book cover with title, author, progress bar
+- `PDFKitView` - UIViewRepresentable wrapping PDFView
+- `SearchView` - Document text search interface
+- `OutlineView` - PDF table of contents navigation
 
 ### Database
 
@@ -56,13 +79,10 @@ Models conform to `Codable`, `FetchableRecord`, `MutablePersistableRecord`:
 ```swift
 struct Book: Identifiable, Codable, FetchableRecord, MutablePersistableRecord {
     var id: Int64?
-    // ... fields
+    var title: String
+    // ... other fields
 
     static let databaseTableName = "books"
-
-    enum Columns: String, ColumnExpression {
-        case id, title, author // ...
-    }
 
     mutating func didInsert(_ inserted: InsertionSuccess) {
         id = inserted.rowID
@@ -112,5 +132,14 @@ func extractAllText(from document: PDFDocument) async -> [(page: Int, text: Stri
 
 - Services are singletons accessed via `.shared`
 - Models use `var id: Int64?` for auto-increment primary keys
-- Errors are enums conforming to `LocalizedError`
+- Errors are enums conforming to `LocalizedError` (e.g., `BookServiceError`, `PDFServiceError`)
 - Views in Modules are organized by feature (Library, Reader)
+- ViewModels use `@MainActor` and `@Observable`/`ObservableObject`
+- Use `Task {}` for async work in view lifecycle
+
+## Known TODOs
+
+Some features are stubbed and need implementation:
+- `AppState.setupServices()` - Service initialization
+- `LibraryView` - `loadBooks()` and `deleteBook()` need database integration
+- `ReaderViewModel.saveProgress()` - Persist reading position to database
