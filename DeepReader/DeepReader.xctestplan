@@ -1,0 +1,24 @@
+{
+  "configurations" : [
+    {
+      "id" : "C2E13F50-8B29-4B3D-A6C2-3F6A5C89B4D2",
+      "name" : "Test Scheme Action",
+      "options" : {
+
+      }
+    }
+  ],
+  "defaultOptions" : {
+    "testRepetitionMode" : "retryOnFailure"
+  },
+  "testTargets" : [
+    {
+      "target" : {
+        "containerPath" : "container:DeepReader.xcodeproj",
+        "identifier" : "DeepReaderTests",
+        "name" : "DeepReaderTests"
+      }
+    }
+  ],
+  "version" : 1
+}
