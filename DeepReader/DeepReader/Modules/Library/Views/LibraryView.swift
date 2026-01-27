@@ -143,7 +143,6 @@ struct BookCardView: View {
 final class LibraryViewModel: ObservableObject {
     @Published var books: [Book] = []
     @Published var isLoading = false
-    @Published var searchText = ""
     
     func loadBooks() async {
         isLoading = true

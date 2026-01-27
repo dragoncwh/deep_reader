@@ -102,19 +102,14 @@ final class BookService {
     }
     
     // MARK: - Text Indexing
-    
+
     private func indexTextContent(for book: Book, document: PDFDocument) async throws {
         guard let bookId = book.id else { return }
-        
+
         let pages = await pdfService.extractAllText(from: document)
-        
-        for page in pages {
-            try database.storeTextContent(
-                bookId: bookId,
-                pageNumber: page.page,
-                text: page.text
-            )
-        }
+
+        // Batch insert all pages in a single transaction
+        try database.storeTextContent(bookId: bookId, pages: pages)
     }
     
     // MARK: - Fetch

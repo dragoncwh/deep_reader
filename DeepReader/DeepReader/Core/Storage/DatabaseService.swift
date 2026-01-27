@@ -8,14 +8,34 @@
 import Foundation
 import GRDB
 
+/// Database service errors
+enum DatabaseServiceError: LocalizedError {
+    case notInitialized
+
+    var errorDescription: String? {
+        switch self {
+        case .notInitialized:
+            return "Database has not been initialized"
+        }
+    }
+}
+
 /// Main database service for the app
 final class DatabaseService {
-    
+
     /// Shared instance
     static let shared = DatabaseService()
-    
+
     /// Database queue for all operations
     private var dbQueue: DatabaseQueue?
+
+    /// Safe access to database queue
+    private func queue() throws -> DatabaseQueue {
+        guard let dbQueue else {
+            throw DatabaseServiceError.notInitialized
+        }
+        return dbQueue
+    }
     
     /// Database file path
     private var databasePath: String {
@@ -113,7 +133,12 @@ final class DatabaseService {
                 END
             """)
         }
-        
+
+        // Add index for faster text_content lookups by bookId
+        migrator.registerMigration("v3_text_content_index") { db in
+            try db.create(index: "idx_text_content_bookId", on: "text_content", columns: ["bookId"])
+        }
+
         try migrator.migrate(dbQueue)
     }
     
@@ -121,30 +146,30 @@ final class DatabaseService {
     
     /// Fetch all books ordered by last opened
     func fetchBooks() throws -> [Book] {
-        try dbQueue!.read { db in
+        try queue().read { db in
             try Book
                 .order(sql: "CASE WHEN lastOpenedAt IS NULL THEN 1 ELSE 0 END, lastOpenedAt DESC, addedAt DESC")
                 .fetchAll(db)
         }
     }
-    
+
     /// Insert or update a book
     func saveBook(_ book: inout Book) throws {
-        try dbQueue!.write { db in
+        try queue().write { db in
             try book.save(db)
         }
     }
-    
+
     /// Delete a book
     func deleteBook(_ book: Book) throws {
-        try dbQueue!.write { db in
+        try queue().write { db in
             try book.delete(db)
         }
     }
-    
+
     /// Update reading progress
     func updateReadingProgress(bookId: Int64, page: Int) throws {
-        try dbQueue!.write { db in
+        try queue().write { db in
             try db.execute(
                 sql: "UPDATE books SET lastReadPage = ?, lastOpenedAt = ? WHERE id = ?",
                 arguments: [page, Date(), bookId]
@@ -153,46 +178,48 @@ final class DatabaseService {
     }
     
     // MARK: - Highlights
-    
+
     /// Fetch highlights for a book
     func fetchHighlights(bookId: Int64) throws -> [Highlight] {
-        try dbQueue!.read { db in
+        try queue().read { db in
             try Highlight
                 .filter(sql: "bookId = ?", arguments: [bookId])
                 .order(sql: "pageNumber, createdAt")
                 .fetchAll(db)
         }
     }
-    
+
     /// Save a highlight
     func saveHighlight(_ highlight: inout Highlight) throws {
-        try dbQueue!.write { db in
+        try queue().write { db in
             try highlight.save(db)
         }
     }
-    
+
     /// Delete a highlight
     func deleteHighlight(_ highlight: Highlight) throws {
-        try dbQueue!.write { db in
+        try queue().write { db in
             try highlight.delete(db)
         }
     }
-    
+
     // MARK: - Text Search
-    
-    /// Store extracted text for a page
-    func storeTextContent(bookId: Int64, pageNumber: Int, text: String) throws {
-        try dbQueue!.write { db in
-            try db.execute(
-                sql: "INSERT INTO text_content (bookId, pageNumber, text) VALUES (?, ?, ?)",
-                arguments: [bookId, pageNumber, text]
-            )
+
+    /// Store extracted text for multiple pages in a single transaction
+    func storeTextContent(bookId: Int64, pages: [(page: Int, text: String)]) throws {
+        try queue().write { db in
+            for page in pages {
+                try db.execute(
+                    sql: "INSERT INTO text_content (bookId, pageNumber, text) VALUES (?, ?, ?)",
+                    arguments: [bookId, page.page, page.text]
+                )
+            }
         }
     }
-    
+
     /// Full-text search across all books
     func searchText(query: String) throws -> [(bookId: Int64, pageNumber: Int, snippet: String)] {
-        try dbQueue!.read { db in
+        try queue().read { db in
             let rows = try Row.fetchAll(db, sql: """
                 SELECT tc.bookId, tc.pageNumber, snippet(text_content_fts, 0, '<b>', '</b>', '...', 20) as snippet
                 FROM text_content_fts
@@ -200,7 +227,7 @@ final class DatabaseService {
                 WHERE text_content_fts MATCH ?
                 LIMIT 100
             """, arguments: [query])
-            
+
             return rows.map { row in
                 (
                     bookId: row["bookId"] as Int64,
