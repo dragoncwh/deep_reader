@@ -123,8 +123,7 @@ final class DatabaseService {
     func fetchBooks() throws -> [Book] {
         try dbQueue!.read { db in
             try Book
-                .order(Book.Columns.lastOpenedAt.desc.nullsLast)
-                .order(Book.Columns.addedAt.desc)
+                .order(sql: "CASE WHEN lastOpenedAt IS NULL THEN 1 ELSE 0 END, lastOpenedAt DESC, addedAt DESC")
                 .fetchAll(db)
         }
     }
@@ -159,9 +158,8 @@ final class DatabaseService {
     func fetchHighlights(bookId: Int64) throws -> [Highlight] {
         try dbQueue!.read { db in
             try Highlight
-                .filter(Highlight.Columns.bookId == bookId)
-                .order(Highlight.Columns.pageNumber)
-                .order(Highlight.Columns.createdAt)
+                .filter(sql: "bookId = ?", arguments: [bookId])
+                .order(sql: "pageNumber, createdAt")
                 .fetchAll(db)
         }
     }

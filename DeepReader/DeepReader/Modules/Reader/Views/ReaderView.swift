@@ -7,6 +7,7 @@
 
 import SwiftUI
 import PDFKit
+import Combine
 
 struct ReaderView: View {
     let book: Book
@@ -321,10 +322,16 @@ final class ReaderViewModel: ObservableObject {
 #Preview {
     NavigationStack {
         ReaderView(book: Book(
+            id: nil,
             title: "Sample Book",
+            author: nil,
             filePath: "/path/to/sample.pdf",
             fileSize: 1024,
-            pageCount: 100
+            pageCount: 100,
+            addedAt: Date(),
+            lastOpenedAt: nil,
+            lastReadPage: 0,
+            coverImagePath: nil
         ))
     }
 }

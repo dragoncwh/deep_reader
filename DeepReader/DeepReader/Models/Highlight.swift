@@ -9,52 +9,14 @@ import Foundation
 import GRDB
 import SwiftUI
 
-/// Represents a text highlight in a PDF document
-struct Highlight: Identifiable, Hashable {
-    var id: Int64?
-    let bookId: Int64
-    let pageNumber: Int
-    let text: String
-    let note: String?
-    let color: HighlightColor
-    let createdAt: Date
-    
-    /// Bounding boxes for the highlight (JSON encoded)
-    let boundsData: Data
-    
-    init(
-        id: Int64? = nil,
-        bookId: Int64,
-        pageNumber: Int,
-        text: String,
-        note: String? = nil,
-        color: HighlightColor = .yellow,
-        createdAt: Date = Date(),
-        bounds: [CGRect]
-    ) {
-        self.id = id
-        self.bookId = bookId
-        self.pageNumber = pageNumber
-        self.text = text
-        self.note = note
-        self.color = color
-        self.createdAt = createdAt
-        self.boundsData = (try? JSONEncoder().encode(bounds)) ?? Data()
-    }
-    
-    var bounds: [CGRect] {
-        (try? JSONDecoder().decode([CGRect].self, from: boundsData)) ?? []
-    }
-}
-
-// MARK: - Highlight Color
+/// Highlight color options
 enum HighlightColor: String, Codable, CaseIterable {
     case yellow
     case green
     case blue
     case pink
     case purple
-    
+
     var color: Color {
         switch self {
         case .yellow: return .yellow.opacity(0.4)
@@ -66,16 +28,24 @@ enum HighlightColor: String, Codable, CaseIterable {
     }
 }
 
-// MARK: - GRDB Codable Record
-extension Highlight: Codable, FetchableRecord, MutablePersistableRecord {
-    
+/// Represents a text highlight in a PDF document
+struct Highlight: Identifiable, Hashable, Codable, FetchableRecord, MutablePersistableRecord {
     static let databaseTableName = "highlights"
-    
-    enum Columns: String, ColumnExpression {
-        case id, bookId, pageNumber, text, note, color, createdAt, boundsData
-    }
-    
+
+    var id: Int64?
+    var bookId: Int64
+    var pageNumber: Int
+    var text: String
+    var note: String?
+    var color: HighlightColor
+    var createdAt: Date
+    var boundsData: Data
+
     mutating func didInsert(_ inserted: InsertionSuccess) {
         id = inserted.rowID
+    }
+
+    var bounds: [CGRect] {
+        (try? JSONDecoder().decode([CGRect].self, from: boundsData)) ?? []
     }
 }

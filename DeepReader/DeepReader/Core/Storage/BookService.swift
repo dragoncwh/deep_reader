@@ -60,11 +60,16 @@ final class BookService {
         
         // Create book record
         var book = Book(
+            id: nil,
             title: title,
             author: author,
             filePath: destinationURL.path,
             fileSize: fileSize,
-            pageCount: document.pageCount
+            pageCount: document.pageCount,
+            addedAt: Date(),
+            lastOpenedAt: nil,
+            lastReadPage: 0,
+            coverImagePath: nil
         )
         
         // Save to database
