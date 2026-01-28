@@ -124,8 +124,8 @@ final class BookService {
 
         Logger.shared.info("Starting text extraction for '\(book.title)' (\(document.pageCount) pages)")
 
-        let pages = await pdfService.extractAllText(from: document, batchSize: 50) { current, total in
-            if current % 100 == 0 || current == total {
+        let pages = await pdfService.extractAllText(from: document, batchSize: PDFProcessingConfig.extractionBatchSize) { current, total in
+            if current % PDFProcessingConfig.progressReportInterval == 0 || current == total {
                 Logger.shared.debug("Text extraction progress: \(current)/\(total) pages")
             }
         }

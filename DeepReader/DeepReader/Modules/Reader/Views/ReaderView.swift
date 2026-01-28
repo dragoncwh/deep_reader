@@ -514,7 +514,7 @@ struct SearchView: View {
     @ObservedObject var viewModel: ReaderViewModel
     @Environment(\.dismiss) private var dismiss
     @State private var searchText = ""
-    @State private var displayLimit = 50
+    @State private var displayLimit = PDFProcessingConfig.searchResultsPerPage
 
     private var displayedResults: [PDFSelection] {
         Array(viewModel.searchResults.prefix(displayLimit))
@@ -540,7 +540,7 @@ struct SearchView: View {
                     }
                 }
                 .onChange(of: searchText) { _, newValue in
-                    displayLimit = 50
+                    displayLimit = PDFProcessingConfig.searchResultsPerPage
                     viewModel.search(query: newValue)
                 }
         }
@@ -576,7 +576,7 @@ struct SearchView: View {
 
     private var loadMoreButton: some View {
         Button {
-            displayLimit += 50
+            displayLimit += PDFProcessingConfig.searchResultsPerPage
         } label: {
             HStack {
                 Spacer()

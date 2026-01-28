@@ -9,6 +9,14 @@ import Foundation
 import PDFKit
 import Vision
 
+/// Configuration constants for PDF processing
+enum PDFProcessingConfig {
+    static let extractionBatchSize = 50
+    static let progressReportInterval = 100
+    static let extractionYieldInterval = 5
+    static let searchResultsPerPage = 50
+}
+
 /// Service for PDF document operations
 final class PDFService {
     
@@ -46,17 +54,17 @@ final class PDFService {
 
     /// Extract text from all pages (legacy method for compatibility)
     func extractAllText(from document: PDFDocument) async -> [(page: Int, text: String)] {
-        await extractAllText(from: document, batchSize: 50, progress: nil)
+        await extractAllText(from: document, batchSize: PDFProcessingConfig.extractionBatchSize, progress: nil)
     }
 
     /// Extract text from all pages with batching and progress callback
     /// - Parameters:
     ///   - document: The PDF document to extract text from
-    ///   - batchSize: Number of pages to process before yielding (default 50)
+    ///   - batchSize: Number of pages to process before yielding (default from PDFProcessingConfig)
     ///   - progress: Optional callback reporting (currentPage, totalPages)
     func extractAllText(
         from document: PDFDocument,
-        batchSize: Int = 50,
+        batchSize: Int = PDFProcessingConfig.extractionBatchSize,
         progress: ((Int, Int) -> Void)?
     ) async -> [(page: Int, text: String)] {
         var results: [(page: Int, text: String)] = []
@@ -76,6 +84,33 @@ final class PDFService {
             }
         }
 
+        return results
+    }
+
+    /// Extract text from specified page range (on-demand extraction)
+    /// - Parameters:
+    ///   - document: The PDF document to extract text from
+    ///   - pageRange: Range of page indices to extract
+    /// - Returns: Array of tuples containing page index and extracted text
+    func extractTextOnDemand(
+        from document: PDFDocument,
+        for pageRange: Range<Int>
+    ) async -> [(page: Int, text: String)] {
+        var results: [(page: Int, text: String)] = []
+
+        for i in pageRange {
+            guard i < document.pageCount else { continue }
+            if let page = document.page(at: i),
+               let text = page.string,
+               !text.isEmpty {
+                results.append((page: i, text: text))
+            }
+
+            // Yield periodically to prevent blocking
+            if (i - pageRange.lowerBound) % PDFProcessingConfig.extractionYieldInterval == 0 {
+                await Task.yield()
+            }
+        }
         return results
     }
     
