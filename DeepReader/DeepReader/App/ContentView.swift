@@ -8,6 +8,10 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
+extension Notification.Name {
+    static let bookImported = Notification.Name("bookImported")
+}
+
 struct ContentView: View {
     @EnvironmentObject var appState: AppState
     
@@ -44,6 +48,7 @@ struct ContentView: View {
         do {
             let book = try await BookService.shared.importPDF(from: url)
             print("Successfully imported: \(book.title)")
+            NotificationCenter.default.post(name: .bookImported, object: nil)
         } catch {
             print("Import failed: \(error.localizedDescription)")
         }

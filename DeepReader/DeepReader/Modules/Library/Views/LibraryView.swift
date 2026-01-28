@@ -143,16 +143,29 @@ struct BookCardView: View {
 final class LibraryViewModel: ObservableObject {
     @Published var books: [Book] = []
     @Published var isLoading = false
-    
+
+    private var cancellables = Set<AnyCancellable>()
+
+    init() {
+        NotificationCenter.default.publisher(for: .bookImported)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                Task {
+                    await self?.loadBooks()
+                }
+            }
+            .store(in: &cancellables)
+    }
+
     func loadBooks() async {
         isLoading = true
         defer { isLoading = false }
-        
+
         // TODO: Load from DatabaseService
         // For now, use sample data
         books = []
     }
-    
+
     func deleteBook(_ book: Book) async {
         // TODO: Implement deletion
     }
