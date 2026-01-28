@@ -205,8 +205,6 @@ struct PDFTextSelection {
     let page: PDFPage
     let pageIndex: Int
     let bounds: [CGRect]
-    let selection: PDFSelection
-    let menuPosition: CGPoint
 }
 
 /// Represents a tapped highlight annotation
@@ -319,9 +317,7 @@ struct PDFKitView: UIViewRepresentable {
                 text: text,
                 page: page,
                 pageIndex: pageIndex,
-                bounds: bounds,
-                selection: selection,
-                menuPosition: .zero
+                bounds: bounds
             )
 
             DispatchQueue.main.async {
@@ -488,18 +484,11 @@ struct PDFKitView: UIViewRepresentable {
                 return
             }
 
-            // Calculate menu position (top center of selection, converted to view coordinates)
-            let topBound = bounds.first!
-            let pdfPoint = CGPoint(x: topBound.midX, y: topBound.maxY)
-            let viewPoint = pdfView.convert(pdfPoint, from: page)
-
             let textSelection = PDFTextSelection(
                 text: text,
                 page: page,
                 pageIndex: pageIndex,
-                bounds: bounds,
-                selection: selection,
-                menuPosition: viewPoint
+                bounds: bounds
             )
 
             DispatchQueue.main.async {
@@ -701,7 +690,7 @@ struct OutlineItemView: View {
 final class ReaderViewModel: ObservableObject {
     let book: Book
 
-    @Published var document: PDFDocument?
+    private(set) var document: PDFDocument?
     @Published var currentPage: Int = 0
     @Published var searchResults: [PDFSelection] = []
     @Published var isLoading = false
@@ -709,6 +698,7 @@ final class ReaderViewModel: ObservableObject {
 
     private var saveProgressCancellable: AnyCancellable?
     private var cancellables = Set<AnyCancellable>()
+    private var appliedHighlightIds: Set<Int64> = []
 
     var pageCount: Int {
         document?.pageCount ?? 0
@@ -796,15 +786,17 @@ final class ReaderViewModel: ObservableObject {
                 page.removeAnnotation(annotation)
             }
         }
+        appliedHighlightIds.removeAll()
 
         // Add annotations for each highlight
         for highlight in highlights {
-            guard let page = document.page(at: highlight.pageNumber) else { continue }
+            guard let page = document.page(at: highlight.pageNumber),
+                  let highlightId = highlight.id else { continue }
 
             // Decode bounds from stored data
             let bounds = highlight.bounds
             guard !bounds.isEmpty else {
-                Logger.shared.warning("Failed to decode bounds for highlight \(highlight.id ?? 0)")
+                Logger.shared.warning("Failed to decode bounds for highlight \(highlightId)")
                 continue
             }
 
@@ -813,12 +805,44 @@ final class ReaderViewModel: ObservableObject {
                 let annotation = PDFAnnotation(bounds: rect, forType: .highlight, withProperties: nil)
                 annotation.color = highlight.color.uiColor.withAlphaComponent(0.4)
                 // Store highlight ID for later reference
-                annotation.setValue(highlight.id, forAnnotationKey: PDFAnnotationKey(rawValue: "highlightId"))
+                annotation.setValue(highlightId, forAnnotationKey: PDFAnnotationKey(rawValue: "highlightId"))
                 page.addAnnotation(annotation)
             }
+            appliedHighlightIds.insert(highlightId)
         }
 
         Logger.shared.debug("Applied \(highlights.count) highlight annotations")
+    }
+
+    /// Apply a single highlight as PDF annotation
+    private func applyHighlightToPage(_ highlight: Highlight) {
+        guard let document = document,
+              let page = document.page(at: highlight.pageNumber),
+              let highlightId = highlight.id else { return }
+
+        for rect in highlight.bounds {
+            let annotation = PDFAnnotation(bounds: rect, forType: .highlight, withProperties: nil)
+            annotation.color = highlight.color.uiColor.withAlphaComponent(0.4)
+            annotation.setValue(highlightId, forAnnotationKey: PDFAnnotationKey(rawValue: "highlightId"))
+            page.addAnnotation(annotation)
+        }
+        appliedHighlightIds.insert(highlightId)
+    }
+
+    /// Remove annotations for a specific highlight
+    private func removeAnnotationForHighlight(_ highlightId: Int64) {
+        guard let document = document else { return }
+
+        for pageIndex in 0..<document.pageCount {
+            guard let page = document.page(at: pageIndex) else { continue }
+            for annotation in page.annotations where annotation.type == "Highlight" {
+                if let annotationHighlightId = annotation.value(forAnnotationKey: PDFAnnotationKey(rawValue: "highlightId")) as? Int64,
+                   annotationHighlightId == highlightId {
+                    page.removeAnnotation(annotation)
+                }
+            }
+        }
+        appliedHighlightIds.remove(highlightId)
     }
 
     func search(query: String) {
@@ -888,8 +912,9 @@ final class ReaderViewModel: ObservableObject {
             try DatabaseService.shared.saveHighlight(&highlight)
             Logger.shared.info("Created highlight on page \(pageIndex + 1): \(text.prefix(30))...")
 
-            // Refresh highlights to show the new one
-            await loadHighlights()
+            // Update local array and render (instead of loadHighlights)
+            highlights.append(highlight)
+            applyHighlightToPage(highlight)
         } catch {
             Logger.shared.error("Failed to create highlight: \(error.localizedDescription)")
         }
@@ -903,8 +928,11 @@ final class ReaderViewModel: ObservableObject {
             try DatabaseService.shared.deleteHighlight(highlight)
             Logger.shared.info("Deleted highlight \(highlight.id ?? 0)")
 
-            // Refresh highlights
-            await loadHighlights()
+            // Update local array and remove annotation (instead of loadHighlights)
+            if let highlightId = highlight.id {
+                highlights.removeAll { $0.id == highlightId }
+                removeAnnotationForHighlight(highlightId)
+            }
         } catch {
             Logger.shared.error("Failed to delete highlight: \(error.localizedDescription)")
         }
@@ -917,8 +945,14 @@ final class ReaderViewModel: ObservableObject {
             try DatabaseService.shared.saveHighlight(&mutableHighlight)
             Logger.shared.info("Updated highlight \(highlight.id ?? 0)")
 
-            // Refresh highlights
-            await loadHighlights()
+            // Update local array and re-render affected highlight
+            if let highlightId = highlight.id,
+               let index = highlights.firstIndex(where: { $0.id == highlightId }) {
+                highlights[index] = mutableHighlight
+                // Re-apply the annotation (remove old, add new)
+                removeAnnotationForHighlight(highlightId)
+                applyHighlightToPage(mutableHighlight)
+            }
         } catch {
             Logger.shared.error("Failed to update highlight: \(error.localizedDescription)")
         }
