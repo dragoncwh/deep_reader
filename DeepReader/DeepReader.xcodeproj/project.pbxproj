@@ -8,16 +8,33 @@
 
 /* Begin PBXBuildFile section */
 		6D4107CB2F2944CC006DFA6B /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = 6D4107CA2F2944CC006DFA6B /* GRDB */; };
+		6D4107D42F294500006DFA6B /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = 6D4107D32F294500006DFA6B /* GRDB */; };
 /* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		6D4107CF2F294500006DFA6B /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 6D41078E2F29434F006DFA6B /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 6D4107952F29434F006DFA6B;
+			remoteInfo = DeepReader;
+		};
+/* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
 		6D4107962F29434F006DFA6B /* DeepReader.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = DeepReader.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		6D4107CD2F294500006DFA6B /* DeepReaderTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = DeepReaderTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		6D4107982F29434F006DFA6B /* DeepReader */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = DeepReader;
+			sourceTree = "<group>";
+		};
+		6D4107CE2F294500006DFA6B /* DeepReaderTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = DeepReaderTests;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -31,6 +48,14 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		6D4107CA2F294500006DFA6B /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				6D4107D42F294500006DFA6B /* GRDB in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -38,6 +63,7 @@
 			isa = PBXGroup;
 			children = (
 				6D4107982F29434F006DFA6B /* DeepReader */,
+				6D4107CE2F294500006DFA6B /* DeepReaderTests */,
 				6D4107972F29434F006DFA6B /* Products */,
 			);
 			sourceTree = "<group>";
@@ -46,6 +72,7 @@
 			isa = PBXGroup;
 			children = (
 				6D4107962F29434F006DFA6B /* DeepReader.app */,
+				6D4107CD2F294500006DFA6B /* DeepReaderTests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -76,6 +103,30 @@
 			productReference = 6D4107962F29434F006DFA6B /* DeepReader.app */;
 			productType = "com.apple.product-type.application";
 		};
+		6D4107CC2F294500006DFA6B /* DeepReaderTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 6D4107D12F294500006DFA6B /* Build configuration list for PBXNativeTarget "DeepReaderTests" */;
+			buildPhases = (
+				6D4107C92F294500006DFA6B /* Sources */,
+				6D4107CA2F294500006DFA6B /* Frameworks */,
+				6D4107CB2F294500006DFA6B /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				6D4107D02F294500006DFA6B /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				6D4107CE2F294500006DFA6B /* DeepReaderTests */,
+			);
+			name = DeepReaderTests;
+			packageProductDependencies = (
+				6D4107D32F294500006DFA6B /* GRDB */,
+			);
+			productName = DeepReaderTests;
+			productReference = 6D4107CD2F294500006DFA6B /* DeepReaderTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -88,6 +139,10 @@
 				TargetAttributes = {
 					6D4107952F29434F006DFA6B = {
 						CreatedOnToolsVersion = 26.2;
+					};
+					6D4107CC2F294500006DFA6B = {
+						CreatedOnToolsVersion = 26.2;
+						TestTargetID = 6D4107952F29434F006DFA6B;
 					};
 				};
 			};
@@ -109,12 +164,20 @@
 			projectRoot = "";
 			targets = (
 				6D4107952F29434F006DFA6B /* DeepReader */,
+				6D4107CC2F294500006DFA6B /* DeepReaderTests */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
 		6D4107942F29434F006DFA6B /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		6D4107CB2F294500006DFA6B /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -131,7 +194,22 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		6D4107C92F294500006DFA6B /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		6D4107D02F294500006DFA6B /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 6D4107952F29434F006DFA6B /* DeepReader */;
+			targetProxy = 6D4107CF2F294500006DFA6B /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		6D41079F2F294350006DFA6B /* Debug */ = {
@@ -315,6 +393,48 @@
 			};
 			name = Release;
 		};
+		6D4107D52F294500006DFA6B /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.2;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.cwh.DeepReaderTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/DeepReader.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/DeepReader";
+			};
+			name = Debug;
+		};
+		6D4107D62F294500006DFA6B /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.2;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.cwh.DeepReaderTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/DeepReader.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/DeepReader";
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -336,6 +456,15 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
+		6D4107D12F294500006DFA6B /* Build configuration list for PBXNativeTarget "DeepReaderTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				6D4107D52F294500006DFA6B /* Debug */,
+				6D4107D62F294500006DFA6B /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 /* End XCConfigurationList section */
 
 /* Begin XCRemoteSwiftPackageReference section */
@@ -351,6 +480,11 @@
 
 /* Begin XCSwiftPackageProductDependency section */
 		6D4107CA2F2944CC006DFA6B /* GRDB */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 6D4107C92F2944CC006DFA6B /* XCRemoteSwiftPackageReference "GRDB" */;
+			productName = GRDB;
+		};
+		6D4107D32F294500006DFA6B /* GRDB */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = 6D4107C92F2944CC006DFA6B /* XCRemoteSwiftPackageReference "GRDB" */;
 			productName = GRDB;
