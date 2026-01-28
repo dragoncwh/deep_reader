@@ -49,10 +49,12 @@ DeepReader/DeepReader/
 │   └── Highlight.swift         # GRDB-backed Highlight model + HighlightColor enum
 ├── Modules/
 │   ├── Library/Views/
-│   │   └── LibraryView.swift   # Library grid + LibraryViewModel + BookCardView
+│   │   └── LibraryView.swift   # Library grid + LibraryViewModel + BookCardView + CoverImageCache
 │   └── Reader/Views/
-│       └── ReaderView.swift    # PDF reader + PDFKitView + SearchView + OutlineView + ReaderViewModel
+│       └── ReaderView.swift    # PDF reader + PDFKitView + SearchView + SearchResultRow + OutlineView + ReaderViewModel
 ├── Core/
+│   ├── Logger/
+│   │   └── Logger.swift        # Centralized logging service (OSLog)
 │   ├── Storage/
 │   │   ├── DatabaseService.swift
 │   │   └── BookService.swift
@@ -64,9 +66,10 @@ DeepReader/DeepReader/
 
 ### Key Services (Singletons)
 
-- `DatabaseService.shared` - SQLite via GRDB, handles migrations, text search, highlights
-- `PDFService.shared` - PDF loading, text extraction, OCR (Vision), cover generation
+- `DatabaseService.shared` - SQLite via GRDB, handles migrations, text search (FTS5 with bm25 ranking), highlights
+- `PDFService.shared` - PDF loading, text extraction (with batching & progress), OCR (Vision), cover generation
 - `BookService.shared` - PDF import, book CRUD, security-scoped file handling
+- `Logger.shared` - Centralized logging using OSLog (debug/info/warning/error levels)
 
 ### ViewModels
 
@@ -76,10 +79,12 @@ DeepReader/DeepReader/
 
 ### UI Components
 
-- `BookCardView` - Book cover with title, author, progress bar
+- `BookCardView` - Book cover with title, author, progress bar (uses CoverImageCache)
 - `PDFKitView` - UIViewRepresentable wrapping PDFView
-- `SearchView` - Document text search interface
+- `SearchView` - Document text search interface (paginated results, 50 per page)
+- `SearchResultRow` - Individual search result row component
 - `OutlineView` - PDF table of contents navigation
+- `CoverImageCache` - NSCache-based image caching (limit: 50 images)
 
 ### Database
 
@@ -156,7 +161,20 @@ func extractAllText(from document: PDFDocument) async -> [(page: Int, text: Stri
 
 ## Known TODOs
 
-Some features are stubbed and need implementation:
+Some features are stubbed or need improvement:
 - `AppState.setupServices()` - Service initialization
-- `LibraryView` - `loadBooks()` and `deleteBook()` need database integration
-- `ReaderViewModel.saveProgress()` - Persist reading position to database
+- Mixed state management in LibraryView (Combine + async/await) - consider unifying
+- ViewModel tests disabled due to Swift 6 @MainActor deallocation issues
+
+## Logging
+
+Use `Logger.shared` for all logging:
+
+```swift
+Logger.shared.debug("Detailed info for debugging")
+Logger.shared.info("General information")
+Logger.shared.warning("Non-critical issues")
+Logger.shared.error("Critical errors")
+```
+
+Logs include file name, line number, and function name automatically.
