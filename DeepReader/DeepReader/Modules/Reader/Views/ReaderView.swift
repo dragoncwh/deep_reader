@@ -17,7 +17,6 @@ struct ReaderView: View {
     @State private var showingHighlights = false
     @State private var showHighlightSuccess = false
     @State private var selectedHighlight: Highlight?
-    @State private var showHighlightDetail = false
 
     init(book: Book) {
         self.book = book
@@ -88,33 +87,39 @@ struct ReaderView: View {
                 }
             )
         }
-        .sheet(isPresented: $showHighlightDetail) {
-            if let highlight = selectedHighlight {
-                HighlightDetailView(
-                    highlight: highlight,
-                    onDelete: {
-                        Task {
-                            await viewModel.deleteHighlight(highlight)
-                        }
-                        showHighlightDetail = false
-                    },
-                    onUpdateColor: { newColor in
-                        var updated = highlight
-                        updated.color = newColor
-                        Task {
-                            await viewModel.updateHighlight(updated)
-                        }
-                    },
-                    onUpdateNote: { newNote in
-                        var updated = highlight
-                        updated.note = newNote.isEmpty ? nil : newNote
-                        Task {
-                            await viewModel.updateHighlight(updated)
+        .sheet(item: $selectedHighlight) { highlight in
+            HighlightDetailView(
+                highlight: highlight,
+                onDelete: {
+                    Task {
+                        await viewModel.deleteHighlight(highlight)
+                    }
+                    selectedHighlight = nil
+                },
+                onUpdateColor: { newColor in
+                    var updated = highlight
+                    updated.color = newColor
+                    Task {
+                        await viewModel.updateHighlight(updated)
+                        // Update selectedHighlight to refresh the sheet
+                        if let refreshed = viewModel.highlights.first(where: { $0.id == highlight.id }) {
+                            selectedHighlight = refreshed
                         }
                     }
-                )
-                .presentationDetents([.medium, .large])
-            }
+                },
+                onUpdateNote: { newNote in
+                    var updated = highlight
+                    updated.note = newNote.isEmpty ? nil : newNote
+                    Task {
+                        await viewModel.updateHighlight(updated)
+                        // Update selectedHighlight to refresh the sheet
+                        if let refreshed = viewModel.highlights.first(where: { $0.id == highlight.id }) {
+                            selectedHighlight = refreshed
+                        }
+                    }
+                }
+            )
+            .presentationDetents([.medium, .large])
         }
         .task {
             await viewModel.loadDocument()
@@ -153,10 +158,9 @@ struct ReaderView: View {
     // MARK: - Selection & Highlight Methods
 
     private func handleHighlightTapped(_ tapInfo: HighlightTapInfo) {
-        // Find the highlight by ID
+        // Find the highlight by ID - setting selectedHighlight triggers the sheet
         if let highlight = viewModel.highlights.first(where: { $0.id == tapInfo.highlightId }) {
             selectedHighlight = highlight
-            showHighlightDetail = true
         }
     }
 
