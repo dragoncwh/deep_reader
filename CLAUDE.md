@@ -18,6 +18,23 @@ iOS PDF reader app focused on learning, with features for highlighting, notes, a
 xcodebuild test -project DeepReader/DeepReader.xcodeproj -scheme DeepReader -destination 'platform=iOS Simulator,name=iPhone 15'
 ```
 
+#### Test Structure
+
+```
+DeepReaderTests/
+├── BookTests.swift           # Book model tests (readingProgress, formattedFileSize)
+├── HighlightTests.swift      # Highlight model + HighlightColor enum tests
+├── DatabaseServiceTests.swift # Database CRUD, FTS5 search, cascade delete
+├── ServiceErrorTests.swift   # LocalizedError conformance tests
+└── ViewModelTests.swift      # Book helper extension tests
+```
+
+#### Testing Notes
+
+- Uses `TestDatabaseService` with temporary file database for isolation
+- Swift 6 strict concurrency mode requires `@unchecked Sendable` and `nonisolated` for test database service
+- `@MainActor` ViewModels (AppState, ReaderViewModel) have deallocation issues in tests - avoid testing directly
+
 ## Architecture
 
 ### Pattern: MVVM with Singleton Services
