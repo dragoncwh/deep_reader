@@ -95,8 +95,8 @@ DeepReader/DeepReader/
 - `SearchResultRow` - Individual search result row component
 - `OutlineView` - PDF table of contents navigation
 - `CoverImageCache` - NSCache-based image caching (limit: 50 images)
-- `HighlightDetailView` - Detail sheet for viewing/editing/deleting highlights
-- `HighlightListView` - List of all highlights grouped by page number
+- `HighlightDetailView` - Detail sheet for viewing/editing/deleting highlights (uses `sheet(item:)` pattern)
+- `HighlightListView` - List of all highlights grouped by page number (uses `contentShape(Rectangle())` for full row tap area)
 - `NoteEditorView` - Text editor for highlight notes
 
 ### Database
@@ -155,6 +155,60 @@ Use async/await for all async operations:
 
 ```swift
 func extractAllText(from document: PDFDocument) async -> [(page: Int, text: String)]
+```
+
+### SwiftUI Sheet Patterns
+
+**Use `sheet(item:)` instead of `sheet(isPresented:)` when passing data to sheets**. This avoids race conditions where the sheet opens before the state is updated:
+
+```swift
+// BAD: Can show blank content due to state race condition
+@State private var selectedItem: Item?
+@State private var showSheet = false
+
+.sheet(isPresented: $showSheet) {
+    if let item = selectedItem { ... }  // selectedItem may be nil
+}
+
+// GOOD: Item is passed directly when sheet opens
+@State private var selectedItem: Item?
+
+.sheet(item: $selectedItem) { item in
+    DetailView(item: item)  // item is guaranteed non-nil
+}
+```
+
+**Refresh the binding after async updates** to reflect changes in the sheet:
+
+```swift
+.sheet(item: $selectedItem) { item in
+    DetailView(
+        item: item,
+        onUpdate: { newValue in
+            Task {
+                await viewModel.update(newValue)
+                // Refresh selectedItem to update sheet content
+                if let refreshed = viewModel.items.first(where: { $0.id == item.id }) {
+                    selectedItem = refreshed
+                }
+            }
+        }
+    )
+}
+```
+
+### SwiftUI List Tap Areas
+
+**Use `contentShape(Rectangle())` to make entire row tappable** in List buttons:
+
+```swift
+Button(action: onTap) {
+    HStack {
+        // row content
+    }
+    .contentShape(Rectangle())  // Ensures full row responds to taps
+}
+.buttonStyle(.plain)
 ```
 
 ## Key Technologies
