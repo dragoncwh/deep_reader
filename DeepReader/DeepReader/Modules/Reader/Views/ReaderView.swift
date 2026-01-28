@@ -18,6 +18,8 @@ struct ReaderView: View {
     @State private var showHighlightMenu = false
     @State private var highlightMenuPosition: CGPoint = .zero
     @State private var showHighlightSuccess = false
+    @State private var selectedHighlight: Highlight?
+    @State private var showHighlightDetail = false
 
     init(book: Book) {
         self.book = book
@@ -32,6 +34,9 @@ struct ReaderView: View {
                 currentPage: $viewModel.currentPage,
                 onSelectionChanged: { selection in
                     handleSelectionChanged(selection)
+                },
+                onHighlightTapped: { tapInfo in
+                    handleHighlightTapped(tapInfo)
                 }
             )
             .ignoresSafeArea(edges: .bottom)
@@ -82,6 +87,34 @@ struct ReaderView: View {
         }
         .sheet(isPresented: $showingOutline) {
             OutlineView(viewModel: viewModel)
+        }
+        .sheet(isPresented: $showHighlightDetail) {
+            if let highlight = selectedHighlight {
+                HighlightDetailView(
+                    highlight: highlight,
+                    onDelete: {
+                        Task {
+                            await viewModel.deleteHighlight(highlight)
+                        }
+                        showHighlightDetail = false
+                    },
+                    onUpdateColor: { newColor in
+                        var updated = highlight
+                        updated.color = newColor
+                        Task {
+                            await viewModel.updateHighlight(updated)
+                        }
+                    },
+                    onUpdateNote: { newNote in
+                        var updated = highlight
+                        updated.note = newNote.isEmpty ? nil : newNote
+                        Task {
+                            await viewModel.updateHighlight(updated)
+                        }
+                    }
+                )
+                .presentationDetents([.medium, .large])
+            }
         }
         .task {
             await viewModel.loadDocument()
@@ -139,6 +172,14 @@ struct ReaderView: View {
         currentSelection = nil
     }
 
+    private func handleHighlightTapped(_ tapInfo: HighlightTapInfo) {
+        // Find the highlight by ID
+        if let highlight = viewModel.highlights.first(where: { $0.id == tapInfo.highlightId }) {
+            selectedHighlight = highlight
+            showHighlightDetail = true
+        }
+    }
+
     private func createHighlight(color: HighlightColor) {
         guard let selection = currentSelection,
               let bookId = book.id else {
@@ -185,11 +226,19 @@ struct PDFTextSelection {
     let menuPosition: CGPoint
 }
 
+/// Represents a tapped highlight annotation
+struct HighlightTapInfo {
+    let highlightId: Int64
+    let pageIndex: Int
+    let tapPosition: CGPoint
+}
+
 // MARK: - PDFKit SwiftUI Wrapper
 struct PDFKitView: UIViewRepresentable {
     let document: PDFDocument?
     @Binding var currentPage: Int
     var onSelectionChanged: ((PDFTextSelection?) -> Void)?
+    var onHighlightTapped: ((HighlightTapInfo) -> Void)?
 
     func makeUIView(context: Context) -> PDFView {
         let pdfView = PDFView()
@@ -218,6 +267,11 @@ struct PDFKitView: UIViewRepresentable {
             object: pdfView
         )
 
+        // Add tap gesture for highlight detection
+        let tapGesture = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleTap(_:)))
+        tapGesture.delegate = context.coordinator
+        pdfView.addGestureRecognizer(tapGesture)
+
         return pdfView
     }
 
@@ -236,7 +290,7 @@ struct PDFKitView: UIViewRepresentable {
         Coordinator(self)
     }
 
-    class Coordinator: NSObject {
+    class Coordinator: NSObject, UIGestureRecognizerDelegate {
         var parent: PDFKitView
 
         init(_ parent: PDFKitView) {
@@ -247,6 +301,11 @@ struct PDFKitView: UIViewRepresentable {
             NotificationCenter.default.removeObserver(self)
         }
 
+        // Allow tap gesture to work alongside text selection
+        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
+            return true
+        }
+
         @objc func pageChanged(_ notification: Notification) {
             guard let pdfView = notification.object as? PDFView,
                   let currentPage = pdfView.currentPage,
@@ -254,6 +313,37 @@ struct PDFKitView: UIViewRepresentable {
 
             DispatchQueue.main.async {
                 self.parent.currentPage = pageIndex
+            }
+        }
+
+        @objc func handleTap(_ gesture: UITapGestureRecognizer) {
+            guard let pdfView = gesture.view as? PDFView else { return }
+
+            let viewLocation = gesture.location(in: pdfView)
+
+            // Get the page at the tap location
+            guard let page = pdfView.page(for: viewLocation, nearest: true),
+                  let document = pdfView.document else { return }
+
+            let pageIndex = document.index(for: page)
+            let pageLocation = pdfView.convert(viewLocation, to: page)
+
+            // Check if tap is on a highlight annotation
+            for annotation in page.annotations {
+                if annotation.type == "Highlight" && annotation.bounds.contains(pageLocation) {
+                    // Get the stored highlight ID
+                    if let highlightId = annotation.value(forAnnotationKey: PDFAnnotationKey(rawValue: "highlightId")) as? Int64 {
+                        let tapInfo = HighlightTapInfo(
+                            highlightId: highlightId,
+                            pageIndex: pageIndex,
+                            tapPosition: viewLocation
+                        )
+                        DispatchQueue.main.async {
+                            self.parent.onHighlightTapped?(tapInfo)
+                        }
+                        return
+                    }
+                }
             }
         }
 
@@ -515,12 +605,18 @@ final class ReaderViewModel: ObservableObject {
     @Published var currentPage: Int = 0
     @Published var searchResults: [PDFSelection] = []
     @Published var isLoading = false
+    @Published var highlights: [Highlight] = []
 
     private var saveProgressCancellable: AnyCancellable?
     private var cancellables = Set<AnyCancellable>()
 
     var pageCount: Int {
         document?.pageCount ?? 0
+    }
+
+    /// Highlights organized by page number for efficient rendering
+    var highlightsByPage: [Int: [Highlight]] {
+        Dictionary(grouping: highlights, by: { $0.pageNumber })
     }
 
     init(book: Book) {
@@ -563,6 +659,61 @@ final class ReaderViewModel: ObservableObject {
                 Logger.shared.error("Failed to load PDF document: \(book.filePath)")
             }
         }
+
+        // Load highlights after document is loaded
+        await loadHighlights()
+    }
+
+    /// Load all highlights for the current book
+    func loadHighlights() async {
+        guard let bookId = book.id else { return }
+
+        do {
+            highlights = try DatabaseService.shared.fetchHighlights(bookId: bookId)
+            Logger.shared.debug("Loaded \(highlights.count) highlights for book \(bookId)")
+
+            // Apply highlights as PDF annotations
+            applyHighlightAnnotations()
+        } catch {
+            Logger.shared.error("Failed to load highlights: \(error.localizedDescription)")
+        }
+    }
+
+    /// Apply highlight annotations to the PDF document
+    private func applyHighlightAnnotations() {
+        guard let document = document else { return }
+
+        // Remove existing highlight annotations first
+        for pageIndex in 0..<document.pageCount {
+            guard let page = document.page(at: pageIndex) else { continue }
+            let annotations = page.annotations
+            for annotation in annotations where annotation.type == "Highlight" {
+                page.removeAnnotation(annotation)
+            }
+        }
+
+        // Add annotations for each highlight
+        for highlight in highlights {
+            guard let page = document.page(at: highlight.pageNumber) else { continue }
+
+            // Decode bounds from stored data
+            let bounds = highlight.bounds
+            guard !bounds.isEmpty else {
+                Logger.shared.warning("Failed to decode bounds for highlight \(highlight.id ?? 0)")
+                continue
+            }
+
+            // Create annotation for each rect (multi-line support)
+            for rect in bounds {
+                let annotation = PDFAnnotation(bounds: rect, forType: .highlight, withProperties: nil)
+                annotation.color = highlight.color.uiColor.withAlphaComponent(0.4)
+                // Store highlight ID for later reference
+                annotation.setValue(highlight.id, forAnnotationKey: PDFAnnotationKey(rawValue: "highlightId"))
+                page.addAnnotation(annotation)
+            }
+        }
+
+        Logger.shared.debug("Applied \(highlights.count) highlight annotations")
     }
 
     func search(query: String) {
@@ -625,9 +776,55 @@ final class ReaderViewModel: ObservableObject {
 
             try DatabaseService.shared.saveHighlight(&highlight)
             Logger.shared.info("Created highlight on page \(pageIndex + 1): \(text.prefix(30))...")
+
+            // Refresh highlights to show the new one
+            await loadHighlights()
         } catch {
             Logger.shared.error("Failed to create highlight: \(error.localizedDescription)")
         }
+    }
+
+    // MARK: - Highlight Management
+
+    /// Delete a highlight
+    func deleteHighlight(_ highlight: Highlight) async {
+        do {
+            try DatabaseService.shared.deleteHighlight(highlight)
+            Logger.shared.info("Deleted highlight \(highlight.id ?? 0)")
+
+            // Refresh highlights
+            await loadHighlights()
+        } catch {
+            Logger.shared.error("Failed to delete highlight: \(error.localizedDescription)")
+        }
+    }
+
+    /// Update a highlight (e.g., change color or note)
+    func updateHighlight(_ highlight: Highlight) async {
+        var mutableHighlight = highlight
+        do {
+            try DatabaseService.shared.saveHighlight(&mutableHighlight)
+            Logger.shared.info("Updated highlight \(highlight.id ?? 0)")
+
+            // Refresh highlights
+            await loadHighlights()
+        } catch {
+            Logger.shared.error("Failed to update highlight: \(error.localizedDescription)")
+        }
+    }
+
+    /// Find highlight at a given point on a page
+    func highlightAtPoint(_ point: CGPoint, onPage pageIndex: Int) -> Highlight? {
+        guard let pageHighlights = highlightsByPage[pageIndex] else { return nil }
+
+        for highlight in pageHighlights {
+            for rect in highlight.bounds {
+                if rect.contains(point) {
+                    return highlight
+                }
+            }
+        }
+        return nil
     }
 }
 

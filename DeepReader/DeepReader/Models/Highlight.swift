@@ -26,6 +26,17 @@ enum HighlightColor: String, Codable, CaseIterable {
         case .purple: return .purple.opacity(0.4)
         }
     }
+
+    /// UIColor for PDFAnnotation (full opacity - annotation handles alpha)
+    var uiColor: UIColor {
+        switch self {
+        case .yellow: return .systemYellow
+        case .green: return .systemGreen
+        case .blue: return .systemBlue
+        case .pink: return .systemPink
+        case .purple: return .systemPurple
+        }
+    }
 }
 
 /// Represents a text highlight in a PDF document
