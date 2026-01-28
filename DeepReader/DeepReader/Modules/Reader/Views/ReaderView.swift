@@ -62,6 +62,7 @@ struct ReaderView: View {
             await viewModel.loadDocument()
         }
         .onDisappear {
+            viewModel.cleanup()
             Task {
                 await viewModel.saveProgress()
             }
@@ -148,43 +149,111 @@ struct SearchView: View {
     @ObservedObject var viewModel: ReaderViewModel
     @Environment(\.dismiss) private var dismiss
     @State private var searchText = ""
-    
+    @State private var displayLimit = 50
+
+    private var displayedResults: [PDFSelection] {
+        Array(viewModel.searchResults.prefix(displayLimit))
+    }
+
+    private var hasMoreResults: Bool {
+        viewModel.searchResults.count > displayLimit
+    }
+
+    private var remainingCount: Int {
+        max(0, viewModel.searchResults.count - displayLimit)
+    }
+
     var body: some View {
         NavigationStack {
-            VStack {
-                if viewModel.searchResults.isEmpty && !searchText.isEmpty {
-                    ContentUnavailableView.search(text: searchText)
-                } else {
-                    List(viewModel.searchResults, id: \.self) { selection in
-                        Button {
-                            viewModel.goToSelection(selection)
-                            dismiss()
-                        } label: {
-                            VStack(alignment: .leading) {
-                                if let page = selection.pages.first,
-                                   let pageIndex = viewModel.document?.index(for: page) {
-                                    Text("Page \(pageIndex + 1)")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
-                                Text(selection.string ?? "")
-                                    .lineLimit(2)
-                            }
-                        }
+            searchContent
+                .navigationTitle(searchResultTitle)
+                .navigationBarTitleDisplayMode(.inline)
+                .searchable(text: $searchText, prompt: "Search in document")
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Done") { dismiss() }
                     }
                 }
-            }
-            .navigationTitle("Search")
-            .navigationBarTitleDisplayMode(.inline)
-            .searchable(text: $searchText, prompt: "Search in document")
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Done") { dismiss() }
+                .onChange(of: searchText) { _, newValue in
+                    displayLimit = 50
+                    viewModel.search(query: newValue)
                 }
+        }
+    }
+
+    @ViewBuilder
+    private var searchContent: some View {
+        if viewModel.searchResults.isEmpty && !searchText.isEmpty {
+            ContentUnavailableView.search(text: searchText)
+        } else {
+            searchResultsList
+        }
+    }
+
+    private var searchResultsList: some View {
+        List {
+            ForEach(displayedResults, id: \.self) { selection in
+                SearchResultRow(
+                    selection: selection,
+                    document: viewModel.document,
+                    onTap: {
+                        viewModel.goToSelection(selection)
+                        dismiss()
+                    }
+                )
             }
-            .onChange(of: searchText) { _, newValue in
-                viewModel.search(query: newValue)
+
+            if hasMoreResults {
+                loadMoreButton
             }
+        }
+    }
+
+    private var loadMoreButton: some View {
+        Button {
+            displayLimit += 50
+        } label: {
+            HStack {
+                Spacer()
+                Text("Load more (\(remainingCount) remaining)")
+                    .foregroundStyle(Color.accentColor)
+                Spacer()
+            }
+        }
+    }
+
+    private var searchResultTitle: String {
+        if viewModel.searchResults.isEmpty {
+            return "Search"
+        } else {
+            return "Search (\(viewModel.searchResults.count) results)"
+        }
+    }
+}
+
+// MARK: - Search Result Row
+struct SearchResultRow: View {
+    let selection: PDFSelection
+    let document: PDFDocument?
+    let onTap: () -> Void
+
+    var body: some View {
+        Button(action: onTap) {
+            VStack(alignment: .leading) {
+                pageLabel
+                Text(selection.string ?? "")
+                    .lineLimit(2)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var pageLabel: some View {
+        if let page = selection.pages.first,
+           let pageIndex = document?.index(for: page) {
+            Text("Page \(pageIndex + 1)")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
     }
 }
@@ -272,7 +341,7 @@ final class ReaderViewModel: ObservableObject {
     @Published var searchResults: [PDFSelection] = []
     @Published var isLoading = false
 
-    private weak var pdfView: PDFView?
+    private var saveProgressCancellable: AnyCancellable?
     private var cancellables = Set<AnyCancellable>()
 
     var pageCount: Int {
@@ -286,7 +355,7 @@ final class ReaderViewModel: ObservableObject {
     }
 
     private func setupPageChangeObserver() {
-        $currentPage
+        saveProgressCancellable = $currentPage
             .dropFirst()
             .debounce(for: .seconds(1), scheduler: DispatchQueue.main)
             .sink { [weak self] _ in
@@ -294,49 +363,63 @@ final class ReaderViewModel: ObservableObject {
                     await self?.saveProgress()
                 }
             }
-            .store(in: &cancellables)
     }
-    
+
+    /// Cancel pending operations before view disappears
+    func cleanup() {
+        saveProgressCancellable?.cancel()
+        saveProgressCancellable = nil
+    }
+
     func loadDocument() async {
         isLoading = true
         defer { isLoading = false }
-        
+
         let url = URL(fileURLWithPath: book.filePath)
+        guard FileManager.default.fileExists(atPath: book.filePath) else {
+            Logger.shared.error("PDF file not found: \(book.filePath)")
+            return
+        }
+
         if url.startAccessingSecurityScopedResource() {
             defer { url.stopAccessingSecurityScopedResource() }
             document = PDFDocument(url: url)
+            if document == nil {
+                Logger.shared.error("Failed to load PDF document: \(book.filePath)")
+            }
         }
     }
-    
+
     func search(query: String) {
         guard !query.isEmpty, let document = document else {
             searchResults = []
             return
         }
-        
+
         searchResults = document.findString(query, withOptions: .caseInsensitive)
     }
-    
+
     func goToSelection(_ selection: PDFSelection) {
         if let page = selection.pages.first,
            let pageIndex = document?.index(for: page) {
             currentPage = pageIndex
         }
     }
-    
+
     func goToDestination(_ destination: PDFDestination) {
         if let page = destination.page,
            let pageIndex = document?.index(for: page) {
             currentPage = pageIndex
         }
     }
-    
+
     func saveProgress() async {
-        guard let bookId = book.id else { return }
+        guard book.id != nil else { return }
         do {
             try BookService.shared.updateProgress(for: book, page: currentPage)
+            Logger.shared.debug("Saved reading progress: page \(currentPage + 1)")
         } catch {
-            print("Failed to save progress: \(error.localizedDescription)")
+            Logger.shared.error("Failed to save progress: \(error.localizedDescription)")
         }
     }
 }

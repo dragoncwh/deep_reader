@@ -25,7 +25,11 @@ final class BookService {
     
     private init() {
         // Ensure books directory exists
-        try? fileManager.createDirectory(at: booksDirectory, withIntermediateDirectories: true)
+        do {
+            try fileManager.createDirectory(at: booksDirectory, withIntermediateDirectories: true)
+        } catch {
+            Logger.shared.error("Failed to create books directory: \(error.localizedDescription)")
+        }
     }
     
     // MARK: - Import
@@ -46,7 +50,11 @@ final class BookService {
         
         // Load and analyze PDF
         guard let document = PDFDocument(url: destinationURL) else {
-            try? fileManager.removeItem(at: destinationURL)
+            do {
+                try fileManager.removeItem(at: destinationURL)
+            } catch {
+                Logger.shared.warning("Failed to cleanup invalid PDF: \(error.localizedDescription)")
+            }
             throw BookServiceError.invalidPDF
         }
         
@@ -77,12 +85,20 @@ final class BookService {
         
         // Generate and save cover asynchronously
         Task {
-            try? await generateCover(for: book, document: document)
+            do {
+                try await generateCover(for: book, document: document)
+            } catch {
+                Logger.shared.warning("Failed to generate cover for '\(book.title)': \(error.localizedDescription)")
+            }
         }
-        
+
         // Index text content asynchronously
         Task {
-            try? await indexTextContent(for: book, document: document)
+            do {
+                try await indexTextContent(for: book, document: document)
+            } catch {
+                Logger.shared.warning("Failed to index text for '\(book.title)': \(error.localizedDescription)")
+            }
         }
         
         return book
@@ -106,10 +122,20 @@ final class BookService {
     private func indexTextContent(for book: Book, document: PDFDocument) async throws {
         guard let bookId = book.id else { return }
 
-        let pages = await pdfService.extractAllText(from: document)
+        Logger.shared.info("Starting text extraction for '\(book.title)' (\(document.pageCount) pages)")
+
+        let pages = await pdfService.extractAllText(from: document, batchSize: 50) { current, total in
+            if current % 100 == 0 || current == total {
+                Logger.shared.debug("Text extraction progress: \(current)/\(total) pages")
+            }
+        }
+
+        Logger.shared.info("Extracted text from \(pages.count) pages, indexing...")
 
         // Batch insert all pages in a single transaction
         try database.storeTextContent(bookId: bookId, pages: pages)
+
+        Logger.shared.info("Text indexing completed for '\(book.title)'")
     }
     
     // MARK: - Fetch
@@ -130,13 +156,21 @@ final class BookService {
     /// Delete a book and its files
     func deleteBook(_ book: Book) throws {
         // Delete file
-        try? fileManager.removeItem(atPath: book.filePath)
-        
+        do {
+            try fileManager.removeItem(atPath: book.filePath)
+        } catch {
+            Logger.shared.warning("Failed to delete PDF file for '\(book.title)': \(error.localizedDescription)")
+        }
+
         // Delete cover
         if let coverPath = book.coverImagePath {
-            try? fileManager.removeItem(atPath: coverPath)
+            do {
+                try fileManager.removeItem(atPath: coverPath)
+            } catch {
+                Logger.shared.warning("Failed to delete cover for '\(book.title)': \(error.localizedDescription)")
+            }
         }
-        
+
         // Delete from database
         try database.deleteBook(book)
     }

@@ -38,24 +38,44 @@ final class PDFService {
     }
     
     // MARK: - Text Extraction
-    
+
     /// Extract all text from a PDF page
     func extractText(from page: PDFPage) -> String? {
         return page.string
     }
-    
-    /// Extract text from all pages
+
+    /// Extract text from all pages (legacy method for compatibility)
     func extractAllText(from document: PDFDocument) async -> [(page: Int, text: String)] {
+        await extractAllText(from: document, batchSize: 50, progress: nil)
+    }
+
+    /// Extract text from all pages with batching and progress callback
+    /// - Parameters:
+    ///   - document: The PDF document to extract text from
+    ///   - batchSize: Number of pages to process before yielding (default 50)
+    ///   - progress: Optional callback reporting (currentPage, totalPages)
+    func extractAllText(
+        from document: PDFDocument,
+        batchSize: Int = 50,
+        progress: ((Int, Int) -> Void)?
+    ) async -> [(page: Int, text: String)] {
         var results: [(page: Int, text: String)] = []
-        
-        for i in 0..<document.pageCount {
+        let pageCount = document.pageCount
+
+        for i in 0..<pageCount {
             if let page = document.page(at: i),
                let text = page.string,
                !text.isEmpty {
                 results.append((page: i, text: text))
             }
+
+            // Report progress and yield every batchSize pages
+            if i % batchSize == 0 || i == pageCount - 1 {
+                progress?(i + 1, pageCount)
+                await Task.yield()
+            }
         }
-        
+
         return results
     }
     

@@ -52,12 +52,13 @@ final class DatabaseService {
         var config = Configuration()
         #if DEBUG
         config.prepareDatabase { db in
-            db.trace { print("SQL: \($0)") }
+            db.trace { Logger.shared.debug("SQL: \($0)") }
         }
         #endif
-        
+
         dbQueue = try DatabaseQueue(path: databasePath, configuration: config)
         try migrate()
+        Logger.shared.info("Database initialized at: \(databasePath)")
     }
     
     /// Run database migrations
@@ -205,32 +206,72 @@ final class DatabaseService {
 
     // MARK: - Text Search
 
-    /// Store extracted text for multiple pages in a single transaction
+    /// Store extracted text for multiple pages using batch insert
     func storeTextContent(bookId: Int64, pages: [(page: Int, text: String)]) throws {
+        guard !pages.isEmpty else { return }
+
         try queue().write { db in
+            // Use prepared statement for better performance
+            let statement = try db.makeStatement(
+                sql: "INSERT INTO text_content (bookId, pageNumber, text) VALUES (?, ?, ?)"
+            )
+
             for page in pages {
-                try db.execute(
-                    sql: "INSERT INTO text_content (bookId, pageNumber, text) VALUES (?, ?, ?)",
-                    arguments: [bookId, page.page, page.text]
-                )
+                try statement.execute(arguments: [bookId, page.page, page.text])
             }
         }
     }
 
-    /// Full-text search across all books
-    func searchText(query: String) throws -> [(bookId: Int64, pageNumber: Int, snippet: String)] {
-        try queue().read { db in
+    /// Full-text search across all books with relevance ranking
+    /// - Parameter query: Search query (supports FTS5 syntax)
+    /// - Returns: Results sorted by relevance (bm25 score)
+    func searchText(query: String) throws -> [(bookId: Int64, pageNumber: Int, snippet: String, rank: Double)] {
+        guard !query.isEmpty else { return [] }
+
+        return try queue().read { db in
+            // Use bm25() for relevance ranking (lower score = more relevant)
             let rows = try Row.fetchAll(db, sql: """
-                SELECT tc.bookId, tc.pageNumber, snippet(text_content_fts, 0, '<b>', '</b>', '...', 20) as snippet
+                SELECT
+                    tc.bookId,
+                    tc.pageNumber,
+                    snippet(text_content_fts, 0, '<b>', '</b>', '...', 32) as snippet,
+                    bm25(text_content_fts) as rank
                 FROM text_content_fts
                 JOIN text_content tc ON tc.id = text_content_fts.rowid
                 WHERE text_content_fts MATCH ?
+                ORDER BY rank
                 LIMIT 100
             """, arguments: [query])
 
             return rows.map { row in
                 (
                     bookId: row["bookId"] as Int64,
+                    pageNumber: row["pageNumber"] as Int,
+                    snippet: row["snippet"] as String,
+                    rank: row["rank"] as Double
+                )
+            }
+        }
+    }
+
+    /// Full-text search within a specific book
+    func searchTextInBook(bookId: Int64, query: String) throws -> [(pageNumber: Int, snippet: String)] {
+        guard !query.isEmpty else { return [] }
+
+        return try queue().read { db in
+            let rows = try Row.fetchAll(db, sql: """
+                SELECT
+                    tc.pageNumber,
+                    snippet(text_content_fts, 0, '<b>', '</b>', '...', 32) as snippet
+                FROM text_content_fts
+                JOIN text_content tc ON tc.id = text_content_fts.rowid
+                WHERE text_content_fts MATCH ? AND tc.bookId = ?
+                ORDER BY tc.pageNumber
+                LIMIT 200
+            """, arguments: [query, bookId])
+
+            return rows.map { row in
+                (
                     pageNumber: row["pageNumber"] as Int,
                     snippet: row["snippet"] as String
                 )

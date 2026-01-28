@@ -29,7 +29,7 @@ struct LibraryView: View {
                 LazyVGrid(columns: columns, spacing: 20) {
                     ForEach(viewModel.books) { book in
                         NavigationLink(value: book) {
-                            BookCardView(book: book)
+                            BookCardView(book: book, coverCache: viewModel.coverCache)
                         }
                         .buttonStyle(.plain)
                         .contextMenu {
@@ -107,6 +107,7 @@ struct LibraryView: View {
 // MARK: - Book Card View
 struct BookCardView: View {
     let book: Book
+    let coverCache: CoverImageCache
     @State private var coverImage: UIImage?
 
     var body: some View {
@@ -130,7 +131,7 @@ struct BookCardView: View {
             .task {
                 await loadCoverImage()
             }
-            
+
             // Book info
             VStack(alignment: .leading, spacing: 4) {
                 Text(book.title)
@@ -138,14 +139,14 @@ struct BookCardView: View {
                     .fontWeight(.medium)
                     .lineLimit(2)
                     .foregroundStyle(.primary)
-                
+
                 if let author = book.author {
                     Text(author)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
-                
+
                 // Progress indicator
                 if book.readingProgress > 0 {
                     ProgressView(value: book.readingProgress)
@@ -154,7 +155,7 @@ struct BookCardView: View {
             }
         }
     }
-    
+
     private var coverPlaceholder: some View {
         VStack {
             Image(systemName: "doc.text")
@@ -168,12 +169,46 @@ struct BookCardView: View {
 
     private func loadCoverImage() async {
         guard let coverPath = book.coverImagePath else { return }
+
+        // Check cache first
+        if let cached = coverCache.image(forKey: coverPath) {
+            coverImage = cached
+            return
+        }
+
+        // Load from disk in background
         let image = await Task.detached(priority: .background) {
             UIImage(contentsOfFile: coverPath)
         }.value
-        await MainActor.run {
-            self.coverImage = image
+
+        if let image = image {
+            coverCache.setImage(image, forKey: coverPath)
+            await MainActor.run {
+                self.coverImage = image
+            }
         }
+    }
+}
+
+// MARK: - Cover Image Cache
+final class CoverImageCache: @unchecked Sendable {
+    private let cache = NSCache<NSString, UIImage>()
+
+    init() {
+        // Limit cache to ~50 images
+        cache.countLimit = 50
+    }
+
+    func image(forKey key: String) -> UIImage? {
+        cache.object(forKey: key as NSString)
+    }
+
+    func setImage(_ image: UIImage, forKey key: String) {
+        cache.setObject(image, forKey: key as NSString)
+    }
+
+    func clear() {
+        cache.removeAllObjects()
     }
 }
 
@@ -183,6 +218,7 @@ final class LibraryViewModel: ObservableObject {
     @Published var books: [Book] = []
     @Published var isLoading = false
 
+    let coverCache = CoverImageCache()
     private var cancellables = Set<AnyCancellable>()
 
     init() {
@@ -203,7 +239,7 @@ final class LibraryViewModel: ObservableObject {
         do {
             books = try BookService.shared.fetchAllBooks()
         } catch {
-            print("Failed to load books: \(error.localizedDescription)")
+            Logger.shared.error("Failed to load books: \(error.localizedDescription)")
             books = []
         }
     }
@@ -211,9 +247,10 @@ final class LibraryViewModel: ObservableObject {
     func deleteBook(_ book: Book) async {
         do {
             try BookService.shared.deleteBook(book)
+            coverCache.clear() // Clear cache when deleting
             await loadBooks()
         } catch {
-            print("Failed to delete book: \(error.localizedDescription)")
+            Logger.shared.error("Failed to delete book: \(error.localizedDescription)")
         }
     }
 }
