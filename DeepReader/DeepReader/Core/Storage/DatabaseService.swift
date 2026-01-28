@@ -144,13 +144,28 @@ final class DatabaseService {
     }
     
     // MARK: - Books
-    
-    /// Fetch all books ordered by last opened
+
+    /// Fetch all books ordered by last opened (recently opened first, then by added date)
     func fetchBooks() throws -> [Book] {
         try queue().read { db in
-            try Book
-                .order(sql: "CASE WHEN lastOpenedAt IS NULL THEN 1 ELSE 0 END, lastOpenedAt DESC, addedAt DESC")
-                .fetchAll(db)
+            try Book.fetchAll(db)
+        }
+        .sorted { a, b in
+            // Books with lastOpenedAt come first, sorted by most recent
+            switch (a.lastOpenedAt, b.lastOpenedAt) {
+            case (nil, nil):
+                // Both never opened, sort by addedAt descending
+                return a.addedAt > b.addedAt
+            case (nil, _):
+                // a never opened, b was opened - b comes first
+                return false
+            case (_, nil):
+                // a was opened, b never opened - a comes first
+                return true
+            case let (aDate?, bDate?):
+                // Both opened, most recent first
+                return aDate > bDate
+            }
         }
     }
 
@@ -254,11 +269,32 @@ final class DatabaseService {
         }
     }
 
-    /// Full-text search within a specific book
-    func searchTextInBook(bookId: Int64, query: String) throws -> [(pageNumber: Int, snippet: String)] {
-        guard !query.isEmpty else { return [] }
+    /// Full-text search within a specific book with pagination
+    /// - Parameters:
+    ///   - bookId: The book to search in
+    ///   - query: Search query (supports FTS5 syntax)
+    ///   - limit: Maximum results per page (default 50)
+    ///   - offset: Number of results to skip (default 0)
+    /// - Returns: Tuple of (total count, paginated results)
+    func searchTextInBook(
+        bookId: Int64,
+        query: String,
+        limit: Int = 50,
+        offset: Int = 0
+    ) throws -> (total: Int, results: [(pageNumber: Int, snippet: String)]) {
+        guard !query.isEmpty else { return (0, []) }
 
         return try queue().read { db in
+            // Get total count first
+            let countRow = try Row.fetchOne(db, sql: """
+                SELECT COUNT(*) as count
+                FROM text_content_fts
+                JOIN text_content tc ON tc.id = text_content_fts.rowid
+                WHERE text_content_fts MATCH ? AND tc.bookId = ?
+            """, arguments: [query, bookId])
+            let total = (countRow?["count"] as? Int) ?? 0
+
+            // Get paginated results
             let rows = try Row.fetchAll(db, sql: """
                 SELECT
                     tc.pageNumber,
@@ -267,15 +303,17 @@ final class DatabaseService {
                 JOIN text_content tc ON tc.id = text_content_fts.rowid
                 WHERE text_content_fts MATCH ? AND tc.bookId = ?
                 ORDER BY tc.pageNumber
-                LIMIT 200
-            """, arguments: [query, bookId])
+                LIMIT ? OFFSET ?
+            """, arguments: [query, bookId, limit, offset])
 
-            return rows.map { row in
+            let results = rows.map { row in
                 (
                     pageNumber: row["pageNumber"] as Int,
                     snippet: row["snippet"] as String
                 )
             }
+
+            return (total, results)
         }
     }
 }
