@@ -51,8 +51,7 @@ DeepReader/DeepReader/
 │   ├── Library/Views/
 │   │   └── LibraryView.swift   # Library grid + LibraryViewModel + BookCardView + CoverImageCache
 │   └── Reader/Views/
-│       ├── ReaderView.swift    # PDF reader + PDFKitView + SearchView + SearchResultRow + OutlineView + ReaderViewModel
-│       ├── HighlightMenuView.swift   # Floating color picker for creating highlights
+│       ├── ReaderView.swift    # PDF reader + HighlightablePDFView + PDFKitView + SearchView + OutlineView + ReaderViewModel
 │       ├── HighlightDetailView.swift # Highlight detail sheet (view/edit/delete)
 │       ├── HighlightListView.swift   # Highlight list grouped by page
 │       └── NoteEditorView.swift      # Note editor for highlights
@@ -88,13 +87,14 @@ DeepReader/DeepReader/
 ### UI Components
 
 - `BookCardView` - Book cover with title, author, progress bar (uses CoverImageCache)
-- `PDFKitView` - UIViewRepresentable wrapping PDFView with text selection and highlight tap detection
+- `PDFKitView` - UIViewRepresentable wrapping `HighlightablePDFView` with text selection and highlight tap detection
   - **Navigation sync**: `updateUIView` must check if `currentPage` binding differs from PDFView's displayed page to handle programmatic navigation (outline, search, highlight list). Without this, only the page indicator updates while the PDF content doesn't scroll.
+  - **Tap gesture**: Only triggers on highlight annotations (via `shouldReceive touch:`), allowing system menu to close normally on tap elsewhere.
+- `HighlightablePDFView` - Custom PDFView subclass that integrates highlight colors into iOS system edit menu via `buildMenu(with:)`. Adds "Highlight" submenu with 5 color options after Copy.
 - `SearchView` - Document text search interface (paginated results, 50 per page)
 - `SearchResultRow` - Individual search result row component
 - `OutlineView` - PDF table of contents navigation
 - `CoverImageCache` - NSCache-based image caching (limit: 50 images)
-- `HighlightMenuView` - Floating color picker menu shown when text is selected
 - `HighlightDetailView` - Detail sheet for viewing/editing/deleting highlights
 - `HighlightListView` - List of all highlights grouped by page number
 - `NoteEditorView` - Text editor for highlight notes
@@ -127,7 +127,7 @@ struct Book: Identifiable, Codable, FetchableRecord, MutablePersistableRecord {
 
 ### Security-Scoped Resources
 
-Always wrap file access for user-selected PDFs:
+Always wrap file access for user-selected PDFs. **Important**: Always attempt file operations regardless of the return value - `startAccessingSecurityScopedResource()` returns `false` for files already in app sandbox, but they're still accessible:
 
 ```swift
 let accessing = url.startAccessingSecurityScopedResource()
@@ -136,6 +136,7 @@ defer {
         url.stopAccessingSecurityScopedResource()
     }
 }
+// Always attempt the file operation here, even if accessing == false
 ```
 
 ### Design System
