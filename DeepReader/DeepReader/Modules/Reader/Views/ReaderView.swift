@@ -14,18 +14,25 @@ struct ReaderView: View {
     @StateObject private var viewModel: ReaderViewModel
     @State private var showingSearch = false
     @State private var showingOutline = false
-    
+    @State private var currentSelection: PDFTextSelection?
+    @State private var showHighlightMenu = false
+    @State private var highlightMenuPosition: CGPoint = .zero
+    @State private var showHighlightSuccess = false
+
     init(book: Book) {
         self.book = book
         _viewModel = StateObject(wrappedValue: ReaderViewModel(book: book))
     }
-    
+
     var body: some View {
         ZStack {
             // PDF View
             PDFKitView(
                 document: viewModel.document,
-                currentPage: $viewModel.currentPage
+                currentPage: $viewModel.currentPage,
+                onSelectionChanged: { selection in
+                    handleSelectionChanged(selection)
+                }
             )
             .ignoresSafeArea(edges: .bottom)
             
@@ -33,6 +40,24 @@ struct ReaderView: View {
             VStack {
                 Spacer()
                 pageIndicator
+            }
+
+            // Highlight menu overlay
+            if showHighlightMenu, currentSelection != nil {
+                HighlightMenuView(
+                    position: highlightMenuPosition,
+                    onColorSelected: { color in
+                        createHighlight(color: color)
+                    },
+                    onDismiss: {
+                        dismissHighlightMenu()
+                    }
+                )
+            }
+
+            // Success feedback overlay
+            if showHighlightSuccess {
+                highlightSuccessOverlay
             }
         }
         .navigationTitle(book.title)
@@ -77,13 +102,95 @@ struct ReaderView: View {
             .background(.ultraThinMaterial, in: Capsule())
             .padding(.bottom, 8)
     }
+
+    private var highlightSuccessOverlay: some View {
+        VStack {
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 50))
+                .foregroundStyle(.green)
+            Text("Highlighted")
+                .font(.headline)
+                .foregroundStyle(.primary)
+        }
+        .padding(Spacing.lg)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: CornerRadius.medium))
+        .transition(.scale.combined(with: .opacity))
+    }
+
+    // MARK: - Selection & Highlight Methods
+
+    private func handleSelectionChanged(_ selection: PDFTextSelection?) {
+        if let selection = selection {
+            currentSelection = selection
+            highlightMenuPosition = selection.menuPosition
+            withAnimation(.easeInOut(duration: 0.2)) {
+                showHighlightMenu = true
+            }
+        } else {
+            // Don't dismiss menu immediately when selection is cleared
+            // The menu will be dismissed when a color is selected or user taps outside
+        }
+    }
+
+    private func dismissHighlightMenu() {
+        withAnimation(.easeInOut(duration: 0.15)) {
+            showHighlightMenu = false
+        }
+        currentSelection = nil
+    }
+
+    private func createHighlight(color: HighlightColor) {
+        guard let selection = currentSelection,
+              let bookId = book.id else {
+            dismissHighlightMenu()
+            return
+        }
+
+        Task {
+            await viewModel.createHighlight(
+                bookId: bookId,
+                pageIndex: selection.pageIndex,
+                text: selection.text,
+                bounds: selection.bounds,
+                color: color
+            )
+
+            // Show success feedback
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                showHighlightSuccess = true
+            }
+
+            // Haptic feedback
+            let generator = UINotificationFeedbackGenerator()
+            generator.notificationOccurred(.success)
+
+            // Auto-dismiss success overlay
+            try? await Task.sleep(nanoseconds: 800_000_000)
+            withAnimation(.easeOut(duration: 0.2)) {
+                showHighlightSuccess = false
+            }
+        }
+
+        dismissHighlightMenu()
+    }
+}
+
+/// Represents a text selection in the PDF
+struct PDFTextSelection {
+    let text: String
+    let page: PDFPage
+    let pageIndex: Int
+    let bounds: [CGRect]
+    let selection: PDFSelection
+    let menuPosition: CGPoint
 }
 
 // MARK: - PDFKit SwiftUI Wrapper
 struct PDFKitView: UIViewRepresentable {
     let document: PDFDocument?
     @Binding var currentPage: Int
-    
+    var onSelectionChanged: ((PDFTextSelection?) -> Void)?
+
     func makeUIView(context: Context) -> PDFView {
         let pdfView = PDFView()
         pdfView.autoScales = true
@@ -91,10 +198,10 @@ struct PDFKitView: UIViewRepresentable {
         pdfView.displayDirection = .vertical
         pdfView.usePageViewController(false)
         pdfView.backgroundColor = UIColor.systemBackground
-        
+
         // Enable text selection
         pdfView.isUserInteractionEnabled = true
-        
+
         // Set delegate for page change notifications
         NotificationCenter.default.addObserver(
             context.coordinator,
@@ -102,25 +209,33 @@ struct PDFKitView: UIViewRepresentable {
             name: .PDFViewPageChanged,
             object: pdfView
         )
-        
+
+        // Listen for selection changes
+        NotificationCenter.default.addObserver(
+            context.coordinator,
+            selector: #selector(Coordinator.selectionChanged),
+            name: .PDFViewSelectionChanged,
+            object: pdfView
+        )
+
         return pdfView
     }
-    
+
     func updateUIView(_ pdfView: PDFView, context: Context) {
         if pdfView.document !== document {
             pdfView.document = document
-            
+
             // Restore reading position
             if let page = document?.page(at: currentPage) {
                 pdfView.go(to: page)
             }
         }
     }
-    
+
     func makeCoordinator() -> Coordinator {
         Coordinator(self)
     }
-    
+
     class Coordinator: NSObject {
         var parent: PDFKitView
 
@@ -139,6 +254,66 @@ struct PDFKitView: UIViewRepresentable {
 
             DispatchQueue.main.async {
                 self.parent.currentPage = pageIndex
+            }
+        }
+
+        @objc func selectionChanged(_ notification: Notification) {
+            guard let pdfView = notification.object as? PDFView else { return }
+
+            guard let selection = pdfView.currentSelection,
+                  let text = selection.string,
+                  !text.isEmpty,
+                  let page = selection.pages.first,
+                  let document = pdfView.document else {
+                // No selection or empty selection
+                DispatchQueue.main.async {
+                    self.parent.onSelectionChanged?(nil)
+                }
+                return
+            }
+
+            let pageIndex = document.index(for: page)
+
+            // Get bounds for each line of the selection
+            var bounds: [CGRect] = []
+            if let lineSelections = selection.selectionsByLine() as? [PDFSelection] {
+                for lineSelection in lineSelections {
+                    let rect = lineSelection.bounds(for: page)
+                    if !rect.isEmpty {
+                        bounds.append(rect)
+                    }
+                }
+            } else {
+                // Fallback to single bounds
+                let rect = selection.bounds(for: page)
+                if !rect.isEmpty {
+                    bounds.append(rect)
+                }
+            }
+
+            guard !bounds.isEmpty else {
+                DispatchQueue.main.async {
+                    self.parent.onSelectionChanged?(nil)
+                }
+                return
+            }
+
+            // Calculate menu position (top center of selection, converted to view coordinates)
+            let topBound = bounds.first!
+            let pdfPoint = CGPoint(x: topBound.midX, y: topBound.maxY)
+            let viewPoint = pdfView.convert(pdfPoint, from: page)
+
+            let textSelection = PDFTextSelection(
+                text: text,
+                page: page,
+                pageIndex: pageIndex,
+                bounds: bounds,
+                selection: selection,
+                menuPosition: viewPoint
+            )
+
+            DispatchQueue.main.async {
+                self.parent.onSelectionChanged?(textSelection)
             }
         }
     }
@@ -420,6 +595,38 @@ final class ReaderViewModel: ObservableObject {
             Logger.shared.debug("Saved reading progress: page \(currentPage + 1)")
         } catch {
             Logger.shared.error("Failed to save progress: \(error.localizedDescription)")
+        }
+    }
+
+    // MARK: - Highlight Creation
+
+    /// Create a new highlight from the current selection
+    func createHighlight(
+        bookId: Int64,
+        pageIndex: Int,
+        text: String,
+        bounds: [CGRect],
+        color: HighlightColor
+    ) async {
+        do {
+            // Encode bounds to JSON data
+            let boundsData = try JSONEncoder().encode(bounds)
+
+            var highlight = Highlight(
+                id: nil,
+                bookId: bookId,
+                pageNumber: pageIndex,
+                text: text,
+                note: nil,
+                color: color,
+                createdAt: Date(),
+                boundsData: boundsData
+            )
+
+            try DatabaseService.shared.saveHighlight(&highlight)
+            Logger.shared.info("Created highlight on page \(pageIndex + 1): \(text.prefix(30))...")
+        } catch {
+            Logger.shared.error("Failed to create highlight: \(error.localizedDescription)")
         }
     }
 }
