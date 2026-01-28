@@ -9,17 +9,18 @@ import XCTest
 import GRDB
 @testable import DeepReader
 
-/// Testable subclass of DatabaseService that uses an in-memory database
-final class TestDatabaseService {
-    private var dbQueue: DatabaseQueue
+/// Testable database service that uses an in-memory database
+/// Marked as Sendable to work with Swift 6 concurrency
+final class TestDatabaseService: @unchecked Sendable {
+    private let dbQueue: DatabaseQueue
 
-    init() throws {
+    nonisolated init() throws {
         // Create in-memory database
-        dbQueue = try DatabaseQueue(named: "test-\(UUID().uuidString)")
+        dbQueue = try DatabaseQueue()
         try migrate()
     }
 
-    private func migrate() throws {
+    private nonisolated func migrate() throws {
         var migrator = DatabaseMigrator()
 
         // Initial schema
@@ -99,7 +100,7 @@ final class TestDatabaseService {
 
     // MARK: - Books
 
-    func fetchBooks() throws -> [Book] {
+    nonisolated func fetchBooks() throws -> [Book] {
         try dbQueue.read { db in
             try Book
                 .order(sql: "CASE WHEN lastOpenedAt IS NULL THEN 1 ELSE 0 END, lastOpenedAt DESC, addedAt DESC")
@@ -107,19 +108,19 @@ final class TestDatabaseService {
         }
     }
 
-    func saveBook(_ book: inout Book) throws {
+    nonisolated func saveBook(_ book: inout Book) throws {
         try dbQueue.write { db in
             try book.save(db)
         }
     }
 
-    func deleteBook(_ book: Book) throws {
+    nonisolated func deleteBook(_ book: Book) throws {
         try dbQueue.write { db in
             try book.delete(db)
         }
     }
 
-    func updateReadingProgress(bookId: Int64, page: Int) throws {
+    nonisolated func updateReadingProgress(bookId: Int64, page: Int) throws {
         try dbQueue.write { db in
             try db.execute(
                 sql: "UPDATE books SET lastReadPage = ?, lastOpenedAt = ? WHERE id = ?",
@@ -130,7 +131,7 @@ final class TestDatabaseService {
 
     // MARK: - Highlights
 
-    func fetchHighlights(bookId: Int64) throws -> [Highlight] {
+    nonisolated func fetchHighlights(bookId: Int64) throws -> [Highlight] {
         try dbQueue.read { db in
             try Highlight
                 .filter(sql: "bookId = ?", arguments: [bookId])
@@ -139,13 +140,13 @@ final class TestDatabaseService {
         }
     }
 
-    func saveHighlight(_ highlight: inout Highlight) throws {
+    nonisolated func saveHighlight(_ highlight: inout Highlight) throws {
         try dbQueue.write { db in
             try highlight.save(db)
         }
     }
 
-    func deleteHighlight(_ highlight: Highlight) throws {
+    nonisolated func deleteHighlight(_ highlight: Highlight) throws {
         try dbQueue.write { db in
             try highlight.delete(db)
         }
@@ -153,7 +154,7 @@ final class TestDatabaseService {
 
     // MARK: - Text Search
 
-    func storeTextContent(bookId: Int64, pages: [(page: Int, text: String)]) throws {
+    nonisolated func storeTextContent(bookId: Int64, pages: [(page: Int, text: String)]) throws {
         try dbQueue.write { db in
             for page in pages {
                 try db.execute(
@@ -164,7 +165,7 @@ final class TestDatabaseService {
         }
     }
 
-    func searchText(query: String) throws -> [(bookId: Int64, pageNumber: Int, snippet: String)] {
+    nonisolated func searchText(query: String) throws -> [(bookId: Int64, pageNumber: Int, snippet: String)] {
         try dbQueue.read { db in
             let rows = try Row.fetchAll(db, sql: """
                 SELECT tc.bookId, tc.pageNumber, snippet(text_content_fts, 0, '<b>', '</b>', '...', 20) as snippet
@@ -189,19 +190,15 @@ final class TestDatabaseService {
 
 final class DatabaseServiceTests: XCTestCase {
 
-    var database: TestDatabaseService!
-
-    override func setUpWithError() throws {
-        database = try TestDatabaseService()
-    }
-
-    override func tearDownWithError() throws {
-        database = nil
+    // Create a fresh database for each test
+    private nonisolated func makeDatabase() throws -> TestDatabaseService {
+        try TestDatabaseService()
     }
 
     // MARK: - Book CRUD Tests
 
     func testSaveAndFetchBook() throws {
+        let database = try makeDatabase()
         var book = Book(
             id: nil,
             title: "Test Book",
@@ -226,6 +223,7 @@ final class DatabaseServiceTests: XCTestCase {
     }
 
     func testSaveMultipleBooks() throws {
+        let database = try makeDatabase()
         var book1 = Book(
             id: nil,
             title: "Book 1",
@@ -242,7 +240,7 @@ final class DatabaseServiceTests: XCTestCase {
         var book2 = Book(
             id: nil,
             title: "Book 2",
-            author: nil,
+            author: "Author 2",
             filePath: "/path/to/book2.pdf",
             fileSize: 2048,
             pageCount: 100,
@@ -260,6 +258,7 @@ final class DatabaseServiceTests: XCTestCase {
     }
 
     func testUpdateBook() throws {
+        let database = try makeDatabase()
         var book = Book(
             id: nil,
             title: "Original Title",
@@ -274,10 +273,13 @@ final class DatabaseServiceTests: XCTestCase {
         )
 
         try database.saveBook(&book)
+        let originalId = book.id
 
         book.title = "Updated Title"
         book.author = "New Author"
         try database.saveBook(&book)
+
+        XCTAssertEqual(book.id, originalId)
 
         let books = try database.fetchBooks()
         XCTAssertEqual(books.count, 1)
@@ -286,9 +288,10 @@ final class DatabaseServiceTests: XCTestCase {
     }
 
     func testDeleteBook() throws {
+        let database = try makeDatabase()
         var book = Book(
             id: nil,
-            title: "Test Book",
+            title: "Book to Delete",
             author: nil,
             filePath: "/path/to/book.pdf",
             fileSize: 1024,
@@ -306,7 +309,63 @@ final class DatabaseServiceTests: XCTestCase {
         XCTAssertEqual(try database.fetchBooks().count, 0)
     }
 
+    func testFetchBooksOrdering() throws {
+        let database = try makeDatabase()
+        let now = Date()
+
+        var book1 = Book(
+            id: nil,
+            title: "Never Opened",
+            author: nil,
+            filePath: "/path/to/book1.pdf",
+            fileSize: 1024,
+            pageCount: 50,
+            addedAt: now.addingTimeInterval(-100),
+            lastOpenedAt: nil,
+            lastReadPage: 0,
+            coverImagePath: nil
+        )
+
+        var book2 = Book(
+            id: nil,
+            title: "Opened First",
+            author: nil,
+            filePath: "/path/to/book2.pdf",
+            fileSize: 1024,
+            pageCount: 50,
+            addedAt: now.addingTimeInterval(-200),
+            lastOpenedAt: now.addingTimeInterval(-50),
+            lastReadPage: 0,
+            coverImagePath: nil
+        )
+
+        var book3 = Book(
+            id: nil,
+            title: "Opened Recently",
+            author: nil,
+            filePath: "/path/to/book3.pdf",
+            fileSize: 1024,
+            pageCount: 50,
+            addedAt: now.addingTimeInterval(-300),
+            lastOpenedAt: now.addingTimeInterval(-10),
+            lastReadPage: 0,
+            coverImagePath: nil
+        )
+
+        try database.saveBook(&book1)
+        try database.saveBook(&book2)
+        try database.saveBook(&book3)
+
+        let books = try database.fetchBooks()
+
+        // Recently opened books first, then never opened
+        XCTAssertEqual(books[0].title, "Opened Recently")
+        XCTAssertEqual(books[1].title, "Opened First")
+        XCTAssertEqual(books[2].title, "Never Opened")
+    }
+
     func testUpdateReadingProgress() throws {
+        let database = try makeDatabase()
         var book = Book(
             id: nil,
             title: "Test Book",
@@ -322,55 +381,17 @@ final class DatabaseServiceTests: XCTestCase {
 
         try database.saveBook(&book)
 
-        try database.updateReadingProgress(bookId: book.id!, page: 50)
+        try database.updateReadingProgress(bookId: book.id!, page: 42)
 
         let books = try database.fetchBooks()
-        XCTAssertEqual(books[0].lastReadPage, 50)
+        XCTAssertEqual(books[0].lastReadPage, 42)
         XCTAssertNotNil(books[0].lastOpenedAt)
-    }
-
-    func testFetchBooksOrdering() throws {
-        // Book with lastOpenedAt (should appear first)
-        var book1 = Book(
-            id: nil,
-            title: "Recently Opened",
-            author: nil,
-            filePath: "/path/to/book1.pdf",
-            fileSize: 1024,
-            pageCount: 100,
-            addedAt: Date().addingTimeInterval(-1000),
-            lastOpenedAt: Date(),
-            lastReadPage: 10,
-            coverImagePath: nil
-        )
-
-        // Book without lastOpenedAt (should appear later)
-        var book2 = Book(
-            id: nil,
-            title: "Never Opened",
-            author: nil,
-            filePath: "/path/to/book2.pdf",
-            fileSize: 1024,
-            pageCount: 100,
-            addedAt: Date(),
-            lastOpenedAt: nil,
-            lastReadPage: 0,
-            coverImagePath: nil
-        )
-
-        try database.saveBook(&book2)
-        try database.saveBook(&book1)
-
-        let books = try database.fetchBooks()
-        XCTAssertEqual(books.count, 2)
-        XCTAssertEqual(books[0].title, "Recently Opened")
-        XCTAssertEqual(books[1].title, "Never Opened")
     }
 
     // MARK: - Highlight CRUD Tests
 
-    func testSaveAndFetchHighlight() throws {
-        // First create a book
+    func testSaveAndFetchHighlights() throws {
+        let database = try makeDatabase()
         var book = Book(
             id: nil,
             title: "Test Book",
@@ -385,8 +406,6 @@ final class DatabaseServiceTests: XCTestCase {
         )
         try database.saveBook(&book)
 
-        // Create highlight
-        let boundsData = try JSONEncoder().encode([CGRect(x: 10, y: 20, width: 100, height: 15)])
         var highlight = Highlight(
             id: nil,
             bookId: book.id!,
@@ -395,7 +414,7 @@ final class DatabaseServiceTests: XCTestCase {
             note: "My note",
             color: .yellow,
             createdAt: Date(),
-            boundsData: boundsData
+            boundsData: Data()
         )
 
         try database.saveHighlight(&highlight)
@@ -410,6 +429,7 @@ final class DatabaseServiceTests: XCTestCase {
     }
 
     func testDeleteHighlight() throws {
+        let database = try makeDatabase()
         var book = Book(
             id: nil,
             title: "Test Book",
@@ -424,26 +444,27 @@ final class DatabaseServiceTests: XCTestCase {
         )
         try database.saveBook(&book)
 
-        let boundsData = try JSONEncoder().encode([CGRect]())
         var highlight = Highlight(
             id: nil,
             bookId: book.id!,
-            pageNumber: 1,
-            text: "Text",
+            pageNumber: 5,
+            text: "To be deleted",
             note: nil,
             color: .green,
             createdAt: Date(),
-            boundsData: boundsData
+            boundsData: Data()
         )
-
         try database.saveHighlight(&highlight)
+
         XCTAssertEqual(try database.fetchHighlights(bookId: book.id!).count, 1)
 
         try database.deleteHighlight(highlight)
+
         XCTAssertEqual(try database.fetchHighlights(bookId: book.id!).count, 0)
     }
 
-    func testHighlightCascadeDeleteOnBookDelete() throws {
+    func testCascadeDeleteHighlightsWhenBookDeleted() throws {
+        let database = try makeDatabase()
         var book = Book(
             id: nil,
             title: "Test Book",
@@ -458,29 +479,56 @@ final class DatabaseServiceTests: XCTestCase {
         )
         try database.saveBook(&book)
 
-        let boundsData = try JSONEncoder().encode([CGRect]())
-        var highlight = Highlight(
+        var highlight1 = Highlight(
             id: nil,
             bookId: book.id!,
             pageNumber: 1,
-            text: "Text",
+            text: "Highlight 1",
+            note: nil,
+            color: .yellow,
+            createdAt: Date(),
+            boundsData: Data()
+        )
+
+        var highlight2 = Highlight(
+            id: nil,
+            bookId: book.id!,
+            pageNumber: 2,
+            text: "Highlight 2",
             note: nil,
             color: .blue,
             createdAt: Date(),
-            boundsData: boundsData
+            boundsData: Data()
         )
-        try database.saveHighlight(&highlight)
 
-        XCTAssertEqual(try database.fetchHighlights(bookId: book.id!).count, 1)
+        try database.saveHighlight(&highlight1)
+        try database.saveHighlight(&highlight2)
 
-        // Delete book - highlights should cascade delete
+        XCTAssertEqual(try database.fetchHighlights(bookId: book.id!).count, 2)
+
+        // Delete book should cascade delete highlights
         try database.deleteBook(book)
 
-        // Verify book is deleted
-        XCTAssertEqual(try database.fetchBooks().count, 0)
+        // Create another book to verify highlights are truly deleted
+        var newBook = Book(
+            id: nil,
+            title: "New Book",
+            author: nil,
+            filePath: "/path/to/newbook.pdf",
+            fileSize: 512,
+            pageCount: 50,
+            addedAt: Date(),
+            lastOpenedAt: nil,
+            lastReadPage: 0,
+            coverImagePath: nil
+        )
+        try database.saveBook(&newBook)
+
+        XCTAssertEqual(try database.fetchHighlights(bookId: newBook.id!).count, 0)
     }
 
-    func testHighlightsOrderedByPageAndDate() throws {
+    func testHighlightsSortedByPageAndCreatedAt() throws {
+        let database = try makeDatabase()
         var book = Book(
             id: nil,
             title: "Test Book",
@@ -495,11 +543,40 @@ final class DatabaseServiceTests: XCTestCase {
         )
         try database.saveBook(&book)
 
-        let boundsData = try JSONEncoder().encode([CGRect]())
+        let now = Date()
 
-        var h1 = Highlight(id: nil, bookId: book.id!, pageNumber: 10, text: "Page 10", note: nil, color: .yellow, createdAt: Date(), boundsData: boundsData)
-        var h2 = Highlight(id: nil, bookId: book.id!, pageNumber: 5, text: "Page 5", note: nil, color: .green, createdAt: Date(), boundsData: boundsData)
-        var h3 = Highlight(id: nil, bookId: book.id!, pageNumber: 5, text: "Page 5 later", note: nil, color: .blue, createdAt: Date().addingTimeInterval(100), boundsData: boundsData)
+        var h1 = Highlight(
+            id: nil,
+            bookId: book.id!,
+            pageNumber: 10,
+            text: "Page 10",
+            note: nil,
+            color: .yellow,
+            createdAt: now,
+            boundsData: Data()
+        )
+
+        var h2 = Highlight(
+            id: nil,
+            bookId: book.id!,
+            pageNumber: 5,
+            text: "Page 5",
+            note: nil,
+            color: .green,
+            createdAt: now.addingTimeInterval(-100),
+            boundsData: Data()
+        )
+
+        var h3 = Highlight(
+            id: nil,
+            bookId: book.id!,
+            pageNumber: 5,
+            text: "Page 5 later",
+            note: nil,
+            color: .blue,
+            createdAt: now,
+            boundsData: Data()
+        )
 
         try database.saveHighlight(&h1)
         try database.saveHighlight(&h2)
@@ -515,6 +592,7 @@ final class DatabaseServiceTests: XCTestCase {
     // MARK: - Full-Text Search Tests
 
     func testStoreAndSearchTextContent() throws {
+        let database = try makeDatabase()
         var book = Book(
             id: nil,
             title: "Test Book",
@@ -548,6 +626,7 @@ final class DatabaseServiceTests: XCTestCase {
     }
 
     func testSearchTextNoResults() throws {
+        let database = try makeDatabase()
         var book = Book(
             id: nil,
             title: "Test Book",
@@ -574,6 +653,7 @@ final class DatabaseServiceTests: XCTestCase {
     }
 
     func testSearchTextAcrossMultipleBooks() throws {
+        let database = try makeDatabase()
         var book1 = Book(
             id: nil,
             title: "Book 1",
@@ -603,10 +683,15 @@ final class DatabaseServiceTests: XCTestCase {
         try database.saveBook(&book1)
         try database.saveBook(&book2)
 
-        try database.storeTextContent(bookId: book1.id!, pages: [(page: 0, text: "iOS development with Swift")])
-        try database.storeTextContent(bookId: book2.id!, pages: [(page: 0, text: "Swift programming basics")])
+        try database.storeTextContent(bookId: book1.id!, pages: [
+            (page: 0, text: "Introduction to programming")
+        ])
 
-        let results = try database.searchText(query: "Swift")
+        try database.storeTextContent(bookId: book2.id!, pages: [
+            (page: 0, text: "Advanced programming techniques")
+        ])
+
+        let results = try database.searchText(query: "programming")
         XCTAssertEqual(results.count, 2)
 
         let bookIds = Set(results.map { $0.bookId })
