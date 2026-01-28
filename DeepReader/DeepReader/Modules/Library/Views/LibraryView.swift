@@ -11,14 +11,19 @@ import Combine
 struct LibraryView: View {
     @EnvironmentObject var appState: AppState
     @StateObject private var viewModel = LibraryViewModel()
-    
+    @State private var bookToDelete: Book?
+
     private let columns = [
         GridItem(.adaptive(minimum: 160, maximum: 200), spacing: 16)
     ]
-    
+
     var body: some View {
         ScrollView {
-            if viewModel.books.isEmpty {
+            if viewModel.isLoading {
+                ProgressView("Loading...")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .padding(.top, 100)
+            } else if viewModel.books.isEmpty {
                 emptyStateView
             } else {
                 LazyVGrid(columns: columns, spacing: 20) {
@@ -27,6 +32,13 @@ struct LibraryView: View {
                             BookCardView(book: book)
                         }
                         .buttonStyle(.plain)
+                        .contextMenu {
+                            Button(role: .destructive) {
+                                bookToDelete = book
+                            } label: {
+                                Label("Delete", systemImage: "trash")
+                            }
+                        }
                     }
                 }
                 .padding()
@@ -44,6 +56,24 @@ struct LibraryView: View {
         }
         .task {
             await viewModel.loadBooks()
+        }
+        .alert("Delete Book", isPresented: .init(
+            get: { bookToDelete != nil },
+            set: { if !$0 { bookToDelete = nil } }
+        )) {
+            Button("Cancel", role: .cancel) {
+                bookToDelete = nil
+            }
+            Button("Delete", role: .destructive) {
+                if let book = bookToDelete {
+                    Task {
+                        await viewModel.deleteBook(book)
+                    }
+                }
+                bookToDelete = nil
+            }
+        } message: {
+            Text("Are you sure you want to delete \"\(bookToDelete?.title ?? "")\"? This cannot be undone.")
         }
     }
     
@@ -77,23 +107,19 @@ struct LibraryView: View {
 // MARK: - Book Card View
 struct BookCardView: View {
     let book: Book
-    
+    @State private var coverImage: UIImage?
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            // Cover image placeholder
+            // Cover image
             ZStack {
                 RoundedRectangle(cornerRadius: 8)
                     .fill(Color.secondary.opacity(0.2))
-                
-                if let coverPath = book.coverImagePath {
-                    // TODO: Load actual cover image
-                    AsyncImage(url: URL(fileURLWithPath: coverPath)) { image in
-                        image
-                            .resizable()
-                            .aspectRatio(contentMode: .fill)
-                    } placeholder: {
-                        coverPlaceholder
-                    }
+
+                if let image = coverImage {
+                    Image(uiImage: image)
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
                 } else {
                     coverPlaceholder
                 }
@@ -101,6 +127,9 @@ struct BookCardView: View {
             .frame(height: 200)
             .clipShape(RoundedRectangle(cornerRadius: 8))
             .shadow(color: .black.opacity(0.1), radius: 4, y: 2)
+            .task {
+                await loadCoverImage()
+            }
             
             // Book info
             VStack(alignment: .leading, spacing: 4) {
@@ -136,6 +165,16 @@ struct BookCardView: View {
                 .foregroundStyle(.secondary)
         }
     }
+
+    private func loadCoverImage() async {
+        guard let coverPath = book.coverImagePath else { return }
+        let image = await Task.detached(priority: .background) {
+            UIImage(contentsOfFile: coverPath)
+        }.value
+        await MainActor.run {
+            self.coverImage = image
+        }
+    }
 }
 
 // MARK: - View Model
@@ -161,13 +200,21 @@ final class LibraryViewModel: ObservableObject {
         isLoading = true
         defer { isLoading = false }
 
-        // TODO: Load from DatabaseService
-        // For now, use sample data
-        books = []
+        do {
+            books = try BookService.shared.fetchAllBooks()
+        } catch {
+            print("Failed to load books: \(error.localizedDescription)")
+            books = []
+        }
     }
 
     func deleteBook(_ book: Book) async {
-        // TODO: Implement deletion
+        do {
+            try BookService.shared.deleteBook(book)
+            await loadBooks()
+        } catch {
+            print("Failed to delete book: \(error.localizedDescription)")
+        }
     }
 }
 
