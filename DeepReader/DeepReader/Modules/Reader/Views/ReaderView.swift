@@ -14,6 +14,7 @@ struct ReaderView: View {
     @StateObject private var viewModel: ReaderViewModel
     @State private var showingSearch = false
     @State private var showingOutline = false
+    @State private var showingHighlights = false
     @State private var currentSelection: PDFTextSelection?
     @State private var showHighlightMenu = false
     @State private var highlightMenuPosition: CGPoint = .zero
@@ -70,11 +71,17 @@ struct ReaderView: View {
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
                 Button {
+                    showingHighlights.toggle()
+                } label: {
+                    Image(systemName: "highlighter")
+                }
+
+                Button {
                     showingOutline.toggle()
                 } label: {
                     Image(systemName: "list.bullet")
                 }
-                
+
                 Button {
                     showingSearch.toggle()
                 } label: {
@@ -87,6 +94,14 @@ struct ReaderView: View {
         }
         .sheet(isPresented: $showingOutline) {
             OutlineView(viewModel: viewModel)
+        }
+        .sheet(isPresented: $showingHighlights) {
+            HighlightListView(
+                viewModel: viewModel,
+                onNavigateToHighlight: { highlight in
+                    navigateToHighlight(highlight)
+                }
+            )
         }
         .sheet(isPresented: $showHighlightDetail) {
             if let highlight = selectedHighlight {
@@ -178,6 +193,11 @@ struct ReaderView: View {
             selectedHighlight = highlight
             showHighlightDetail = true
         }
+    }
+
+    private func navigateToHighlight(_ highlight: Highlight) {
+        // Navigate to the page containing the highlight
+        viewModel.goToPage(highlight.pageNumber)
     }
 
     private func createHighlight(color: HighlightColor) {
@@ -737,6 +757,12 @@ final class ReaderViewModel: ObservableObject {
            let pageIndex = document?.index(for: page) {
             currentPage = pageIndex
         }
+    }
+
+    /// Navigate to a specific page
+    func goToPage(_ pageIndex: Int) {
+        guard pageIndex >= 0 && pageIndex < pageCount else { return }
+        currentPage = pageIndex
     }
 
     func saveProgress() async {
