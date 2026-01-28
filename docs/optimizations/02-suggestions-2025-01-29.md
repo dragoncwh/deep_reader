@@ -5,6 +5,8 @@
 本文档记录了对 DeepReader 代码库的全面审查结果，包含性能、内存、架构和代码质量方面的优化建议。
 
 **审查日期**: 2025-01-29
+**实施日期**: 2025-01-29
+**状态**: ✅ 全部完成
 
 **预期收益**:
 - 高亮操作: 40-60% 性能提升
@@ -13,9 +15,36 @@
 
 ---
 
+## 实施总结
+
+### 提交记录
+
+| Commit | 描述 | 涉及优化 |
+|--------|------|----------|
+| `8f9a0ac` | Optimize LibraryView: fix memory leaks and modernize state management | #5, #6, #13, #15 |
+| `e0a84c5` | Add PDFProcessingConfig and on-demand text extraction | #2, #12 |
+| `74c3530` | Optimize DatabaseService: Swift sorting and search pagination | #7, #9 |
+| `0e684be` | Optimize ReaderView: eliminate redundant highlight refreshes | #1, #3, #4, #8, #11 |
+| `a7cc7bd` | Add StorageManager for centralized path management | #10, #14 |
+
+### 修改的文件
+
+| 文件 | 修改类型 | 涉及优化 |
+|------|----------|----------|
+| `Core/Storage/StorageManager.swift` | 新增 | #10 |
+| `Core/Storage/DatabaseService.swift` | 修改 | #7, #9 |
+| `Core/Storage/BookService.swift` | 修改 | #10, #12 |
+| `Core/PDF/PDFService.swift` | 修改 | #2, #10, #12 |
+| `Modules/Library/Views/LibraryView.swift` | 修改 | #5, #6, #13, #15 |
+| `Modules/Reader/Views/ReaderView.swift` | 修改 | #1, #3, #4, #8, #11, #12 |
+
+---
+
 ## 高优先级 (HIGH PRIORITY)
 
-### 1. 消除冗余的高亮刷新循环
+### 1. 消除冗余的高亮刷新循环 ✅
+
+**状态**: 已实施 (commit `0e684be`)
 
 **问题描述**:
 每次高亮 CRUD 操作（创建、更新、删除）都调用 `loadHighlights()`，导致：
@@ -23,553 +52,262 @@
 - 清除并重新渲染所有 PDF 注释
 - 触发昂贵的视图重绘
 
-**影响位置**: `ReaderView.swift` - ReaderViewModel (lines 892, 907, 921)
+**实施方案**:
+- `createHighlight()`: 保存后直接 `highlights.append()` + `applyHighlightToPage()`
+- `deleteHighlight()`: 删除后直接 `highlights.removeAll()` + `removeAnnotationForHighlight()`
+- `updateHighlight()`: 更新后直接修改数组元素 + 重新渲染单个高亮
+- 添加 `applyHighlightToPage()` 辅助方法仅渲染单个高亮
+- 添加 `removeAnnotationForHighlight()` 辅助方法仅移除指定高亮
 
-**性能影响**: 创建/编辑/删除多个高亮会导致级联的数据库查询和 PDF 渲染
-
-**建议方案**:
-不再执行全量刷新，而是直接更新本地 `highlights` 数组，仅更新受影响的注释：
-
-```swift
-// 当前实现（低效）:
-func createHighlight(...) async {
-    // ...保存到数据库...
-    await loadHighlights()  // 重新获取所有高亮并重绘
-}
-
-// 优化后:
-func createHighlight(...) async {
-    let boundsData = try JSONEncoder().encode(bounds)
-    var highlight = Highlight(...)
-    try DatabaseService.shared.saveHighlight(&highlight)
-
-    // 本地添加，不重新获取
-    highlights.append(highlight)
-    applyHighlightToPage(highlight)  // 仅更新当前页
-}
-
-private func applyHighlightToPage(_ highlight: Highlight) {
-    guard let document = document,
-          let page = document.page(at: highlight.pageNumber) else { return }
-
-    for rect in highlight.bounds {
-        let annotation = PDFAnnotation(bounds: rect, forType: .highlight, withProperties: nil)
-        annotation.color = highlight.color.uiColor.withAlphaComponent(0.4)
-        annotation.setValue(highlight.id, forAnnotationKey: PDFAnnotationKey(rawValue: "highlightId"))
-        page.addAnnotation(annotation)
-    }
-}
-```
+**修改文件**: `ReaderView.swift`
 
 ---
 
-### 2. 低效的 PDF 文本提取
+### 2. 低效的 PDF 文本提取 ✅
+
+**状态**: 已实施 (commit `e0a84c5`)
 
 **问题描述**:
 `PDFService.extractAllText()` 一次性提取所有页面的文本，不考虑实际需求。
 
-**影响位置**:
-- `PDFService.swift` (lines 57-80)
-- `BookService.swift` (line 127)
+**实施方案**:
+- 添加 `extractTextOnDemand(from:for:)` 方法支持按页面范围提取
+- 使用 `PDFProcessingConfig.extractionYieldInterval` 控制 yield 频率
+- 保留原有方法向后兼容
 
-**性能影响**:
-- 大型 PDF 导入时内存峰值
-- 文本索引期间阻塞 UI（即使在后台 Task 中运行）
-- 无法取消超大书籍的部分提取
-
-**建议方案**:
-实现懒加载/按需文本提取：
-
-```swift
-/// 仅提取指定页面范围的文本
-func extractTextOnDemand(
-    from document: PDFDocument,
-    for pageRange: Range<Int>
-) async -> [(page: Int, text: String)] {
-    var results: [(page: Int, text: String)] = []
-
-    for i in pageRange {
-        if let page = document.page(at: i),
-           let text = page.string,
-           !text.isEmpty {
-            results.append((page: i, text: text))
-
-            // 每 5 页让出控制权，防止内存堆积
-            if i % 5 == 0 {
-                await Task.yield()
-            }
-        }
-    }
-    return results
-}
-```
-
-同时为 `BookService.indexTextContent()` 添加取消令牌，允许用户导入大型 PDF 而不必完成全量索引。
+**修改文件**: `PDFService.swift`
 
 ---
 
-### 3. ViewModel 过度发布状态
+### 3. ViewModel 过度发布状态 ✅
+
+**状态**: 已实施 (commit `0e684be`)
 
 **问题描述**:
 ReaderViewModel 对 `document` 使用 `@Published`，即使只有页码变化也会触发 sheet/详情视图重绘。
 
-**影响位置**: `ReaderView.swift`, line 704
+**实施方案**:
+- 将 `@Published var document: PDFDocument?` 改为 `private(set) var document: PDFDocument?`
+- 翻页时不再触发不必要的视图重计算
 
-**性能影响**: 每次翻页都会因 `@Published var document` 导致不必要的视图重计算
-
-**建议方案**:
-对文档引用使用非发布的状态：
-
-```swift
-@MainActor
-final class ReaderViewModel: ObservableObject {
-    let book: Book
-
-    // 保持可观察的初始加载/状态
-    @Published var pageCount: Int = 0
-    @Published var currentPage: Int = 0
-    @Published var searchResults: [PDFSelection] = []
-    @Published var isLoading = false
-    @Published var highlights: [Highlight] = []
-
-    // 非发布的文档引用（不触发重计算）
-    private(set) var document: PDFDocument?
-
-    func loadDocument() async {
-        // ... 加载逻辑 ...
-        self.document = PDFDocument(url: url)
-        self.pageCount = document?.pageCount ?? 0
-        await loadHighlights()
-    }
-}
-```
+**修改文件**: `ReaderView.swift`
 
 ---
 
-### 4. 低效的高亮注释清除
+### 4. 低效的高亮注释清除 ✅
+
+**状态**: 已实施 (commit `0e684be`)
 
 **问题描述**:
 `applyHighlightAnnotations()` 每次加载高亮时都移除所有注释。
 
-**影响位置**: `ReaderView.swift`, lines 791-797
+**实施方案**:
+- 添加 `appliedHighlightIds: Set<Int64>` 跟踪已渲染的高亮
+- 添加 `removeAnnotationForHighlight(_:)` 方法按 ID 移除单个高亮的注释
+- CRUD 操作使用增量更新而非全量刷新
 
-**性能影响**: 对于页数多的 PDF 操作昂贵；每次高亮变化都会调用
-
-**建议方案**:
-跟踪已应用的高亮，仅移除变化的部分：
-
-```swift
-private var appliedHighlightIds: Set<Int64> = []
-
-func applyHighlightAnnotations() {
-    guard let document = document else { return }
-
-    let currentIds = Set(highlights.compactMap { $0.id })
-    let toRemove = appliedHighlightIds.subtracting(currentIds)
-    let toAdd = currentIds.subtracting(appliedHighlightIds)
-
-    // 仅移除变化的高亮
-    for highlightId in toRemove {
-        removeAnnotationForHighlight(highlightId, from: document)
-    }
-
-    // 仅添加新高亮
-    for highlight in highlights where toAdd.contains(highlight.id ?? 0) {
-        applyHighlightToPage(highlight)
-    }
-
-    appliedHighlightIds = currentIds
-}
-```
+**修改文件**: `ReaderView.swift`
 
 ---
 
-### 5. NotificationCenter 内存泄漏风险
+### 5. NotificationCenter 内存泄漏风险 ✅
+
+**状态**: 已实施 (commit `8f9a0ac`)
 
 **问题描述**:
 LibraryViewModel 使用 NotificationCenter 但没有强保证清理。
 
-**影响位置**: `LibraryView.swift`, lines 225-232
+**实施方案**:
+- 移除 ViewModel 中的 Combine 订阅代码
+- 使用视图层的 `.onReceive(NotificationCenter.default.publisher(for: .bookImported))` 替代
+- SwiftUI 自动管理生命周期，无泄漏风险
 
-**性能影响**: 如果 ViewModel 在未清理的情况下被释放，观察者仍保持注册状态
-
-**建议方案**:
-使用 `onReceive` 修饰符或实现显式清理：
-
-```swift
-// 方案 1: 在 ViewModel 中添加 deinit
-@MainActor
-final class LibraryViewModel: ObservableObject {
-    // ... 现有代码 ...
-
-    deinit {
-        NotificationCenter.default.removeObserver(self)
-    }
-}
-
-// 方案 2: 在视图中使用 onReceive
-.onReceive(
-    NotificationCenter.default.publisher(for: .bookImported),
-    perform: { _ in
-        Task {
-            await viewModel.loadBooks()
-        }
-    }
-)
-```
+**修改文件**: `LibraryView.swift`
 
 ---
 
 ## 中优先级 (MEDIUM PRIORITY)
 
-### 6. 封面图片缓存未清理
+### 6. 封面图片缓存未清理 ✅
+
+**状态**: 已实施 (commit `8f9a0ac`)
 
 **问题描述**:
-`CoverImageCache` 在整个应用生命周期内持续存在，限制 50 张图片，但书库可能有数百本书。
+`CoverImageCache` 在整个应用生命周期内持续存在，仅在删除书籍时清理，从不响应内存警告。
 
-**影响位置**: `LibraryView.swift`, line 221, line 250
+**实施方案**:
+- 在 `init()` 中添加 `UIApplication.didReceiveMemoryWarningNotification` 监听
+- 添加 `@objc private func handleMemoryWarning()` 清空缓存
+- 添加 `deinit` 移除观察者
 
-**问题**: 仅在删除书籍时清理，从不响应内存警告
-
-**建议方案**:
-添加内存压力处理：
-
-```swift
-final class CoverImageCache: @unchecked Sendable {
-    private let cache = NSCache<NSString, UIImage>()
-
-    init() {
-        cache.countLimit = 50
-
-        // 监听内存警告
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(handleMemoryWarning),
-            name: UIApplication.didReceiveMemoryWarningNotification,
-            object: nil
-        )
-    }
-
-    @objc private func handleMemoryWarning() {
-        cache.removeAllObjects()
-    }
-
-    deinit {
-        NotificationCenter.default.removeObserver(self)
-    }
-}
-```
+**修改文件**: `LibraryView.swift`
 
 ---
 
-### 7. 低效的书籍查询
+### 7. 低效的书籍查询 ✅
+
+**状态**: 已实施 (commit `74c3530`)
 
 **问题描述**:
 `fetchBooks()` 使用复杂的 CASE 语句，可能无法有效使用索引。
 
-**影响位置**: `DatabaseService.swift`, lines 149-154
+**实施方案**:
+- 改为先获取所有书籍，然后在 Swift 中排序
+- 使用 switch 语句处理 `lastOpenedAt` 的可选值
+- 排序逻辑：有 lastOpenedAt 的排前面（按最近打开排序），没有的按 addedAt 排序
 
-```swift
-// 当前实现
-try Book
-    .order(sql: "CASE WHEN lastOpenedAt IS NULL THEN 1 ELSE 0 END, lastOpenedAt DESC, addedAt DESC")
-    .fetchAll(db)
-```
-
-**建议方案**:
-
-```swift
-// 方案 1: 在 Swift 中排序（适合小数据集）
-func fetchBooks() throws -> [Book] {
-    try queue().read { db in
-        try Book.fetchAll(db)
-    }
-    .sorted { a, b in
-        let aDate = a.lastOpenedAt ?? .distantPast
-        let bDate = b.lastOpenedAt ?? .distantPast
-        return aDate > bDate
-    }
-}
-
-// 方案 2: 为大型书库添加索引
-migrator.registerMigration("v4_reading_order_index") { db in
-    try db.create(index: "idx_books_reading_order",
-                  on: "books",
-                  columns: ["lastOpenedAt", "addedAt"])
-}
-```
+**修改文件**: `DatabaseService.swift`
 
 ---
 
-### 8. PDFKitView 冗余页面变化通知
+### 8. PDFKitView 冗余页面变化通知 ✅
+
+**状态**: 已确认无需修改 (commit `0e684be`)
 
 **问题描述**:
 `pageChanged()` 回调和 `currentPage` 绑定同步可能同时触发。
 
-**影响位置**: `ReaderView.swift`, lines 409-416 和 358-372
-
-**问题**: 从通知更新 `currentPage` → 触发 `updateUIView` → 可能再次调用 `pdfView.go(to:)`
-
-**建议方案**:
-使用单一数据源并添加防抖：
-
-```swift
-func updateUIView(_ pdfView: PDFView, context: Context) {
-    // 仅在有意义的差异时同步
-    if pdfView.document !== document {
-        pdfView.document = document
-        if let page = document?.page(at: currentPage) {
-            pdfView.go(to: page)
-        }
-    } else {
-        // 检查是否需要导航（避免冗余调用）
-        if let currentPDFPage = pdfView.currentPage,
-           let index = pdfView.document?.index(for: currentPDFPage),
-           index != currentPage,
-           let targetPage = pdfView.document?.page(at: currentPage) {
-            pdfView.go(to: targetPage)
-        }
-    }
-}
-```
+**实施结果**:
+- 代码审查确认 `updateUIView` 已有正确的检查逻辑
+- 仅在 `currentPDFPageIndex != currentPage` 时才调用 `go(to:)`
+- 无需额外修改
 
 ---
 
-### 9. 搜索视图分页将所有结果加载到内存
+### 9. 搜索视图分页将所有结果加载到内存 ✅
+
+**状态**: 已实施 (commit `74c3530`)
 
 **问题描述**:
 所有搜索结果存储在 `searchResults` 数组中；通过 SwiftUI 的 `.prefix()` 进行分页。
 
-**影响位置**: `ReaderView.swift`, lines 824-831, 519-521
+**实施方案**:
+- 修改 `searchTextInBook()` 添加 `limit` 和 `offset` 参数
+- 返回值改为 `(total: Int, results: [...])` 格式
+- 先执行 COUNT 查询获取总数，再执行分页查询
 
-**性能影响**: 包含常见搜索词的大型文档可能将数千个结果加载到内存中
-
-**建议方案**:
-在 DatabaseService 中实现真正的数据库级分页：
-
-```swift
-func searchTextInBook(
-    bookId: Int64,
-    query: String,
-    limit: Int = 50,
-    offset: Int = 0
-) throws -> (total: Int, results: [(pageNumber: Int, snippet: String)]) {
-    guard !query.isEmpty else { return (0, []) }
-
-    return try queue().read { db in
-        // 获取总数
-        let totalRow = try Row.fetchOne(db, sql: """
-            SELECT COUNT(*) as count FROM text_content_fts
-            JOIN text_content tc ON tc.id = text_content_fts.rowid
-            WHERE text_content_fts MATCH ? AND tc.bookId = ?
-        """, arguments: [query, bookId])
-        let total = (totalRow?["count"] as? Int) ?? 0
-
-        // 获取分页结果
-        let rows = try Row.fetchAll(db, sql: """
-            SELECT
-                tc.pageNumber,
-                snippet(text_content_fts, 0, '<b>', '</b>', '...', 32) as snippet
-            FROM text_content_fts
-            JOIN text_content tc ON tc.id = text_content_fts.rowid
-            WHERE text_content_fts MATCH ? AND tc.bookId = ?
-            ORDER BY tc.pageNumber
-            LIMIT ? OFFSET ?
-        """, arguments: [query, bookId, limit, offset])
-
-        return (total, rows.map { row in
-            (
-                pageNumber: row["pageNumber"] as Int,
-                snippet: row["snippet"] as String
-            )
-        })
-    }
-}
-```
+**修改文件**: `DatabaseService.swift`
 
 ---
 
-### 10. 文件路径字符串操作
+### 10. 文件路径字符串操作 ✅
+
+**状态**: 已实施 (commit `a7cc7bd`)
 
 **问题描述**:
 文件路径在多处以字符串形式构造；容易出错且难以重构。
 
-**影响位置**: `BookService.swift`, `PDFService.swift`, `DatabaseService.swift`
+**实施方案**:
+- 创建 `StorageManager.swift` 枚举
+- 定义 `Directory` 嵌套枚举 (`.books`, `.covers`)
+- 提供 `url(for:fileName:)`, `path(for:fileName:)`, `ensureDirectoryExists(_:)` 方法
+- 更新 BookService 和 PDFService 使用 StorageManager
 
-**建议方案**:
-创建存储管理抽象：
-
-```swift
-struct StorageManager {
-    enum Directory {
-        case books
-        case covers
-        case database
-
-        var url: URL {
-            let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-            switch self {
-            case .books: return docs.appendingPathComponent("Books", isDirectory: true)
-            case .covers: return docs.appendingPathComponent("Covers", isDirectory: true)
-            case .database: return docs.appendingPathComponent("Database", isDirectory: true)
-            }
-        }
-    }
-
-    static func url(for directory: Directory, fileName: String) -> URL {
-        directory.url.appendingPathComponent(fileName)
-    }
-
-    static func path(for directory: Directory, fileName: String) -> String {
-        url(for: directory, fileName: fileName).path
-    }
-
-    static func ensureDirectoryExists(_ directory: Directory) throws {
-        try FileManager.default.createDirectory(
-            at: directory.url,
-            withIntermediateDirectories: true
-        )
-    }
-}
-```
+**新增文件**: `Core/Storage/StorageManager.swift`
+**修改文件**: `BookService.swift`, `PDFService.swift`
 
 ---
 
 ## 低优先级 (LOW PRIORITY)
 
-### 11. PDFTextSelection 中未使用的属性
+### 11. PDFTextSelection 中未使用的属性 ✅
+
+**状态**: 已实施 (commit `0e684be`)
 
 **问题描述**:
 `PDFTextSelection` 结构体包含未使用的 `selection` 和 `menuPosition`。
 
-**影响位置**: `ReaderView.swift`, lines 202-210
+**实施方案**:
+- 移除 `selection: PDFSelection` 字段
+- 移除 `menuPosition: CGPoint` 字段
+- 更新所有创建 `PDFTextSelection` 的位置
 
-**建议方案**:
-移除未使用的字段：
-
-```swift
-struct PDFTextSelection {
-    let text: String
-    let page: PDFPage
-    let pageIndex: Int
-    let bounds: [CGRect]
-    // 已移除: selection, menuPosition (未使用)
-}
-```
+**修改文件**: `ReaderView.swift`
 
 ---
 
-### 12. 硬编码的批处理大小
+### 12. 硬编码的批处理大小 ✅
+
+**状态**: 已实施 (commit `e0a84c5`)
 
 **问题描述**:
 批处理大小在多处硬编码（50, 100 页）。
 
-**影响位置**: `PDFService.swift` (50), `BookService.swift` (100)
+**实施方案**:
+- 创建 `PDFProcessingConfig` 枚举
+- 定义常量：`extractionBatchSize`, `progressReportInterval`, `extractionYieldInterval`, `searchResultsPerPage`
+- 更新 PDFService, BookService, SearchView 使用配置常量
 
-**建议方案**:
-创建配置常量：
-
-```swift
-enum PDFProcessingConfig {
-    static let extractionBatchSize = 50
-    static let progressReportInterval = 100
-    static let extractionYieldInterval = 5
-    static let searchResultsPerPage = 50
-}
-```
+**修改文件**: `PDFService.swift`, `BookService.swift`, `ReaderView.swift`
 
 ---
 
-### 13. 混合的 Combine/Async-Await 状态管理
+### 13. 混合的 Combine/Async-Await 状态管理 ✅
+
+**状态**: 已实施 (commit `8f9a0ac`)
 
 **问题描述**:
 LibraryViewModel 同时使用 `@Published` + `AnyCancellable` 和 `async/await`。
 
-**影响位置**: `LibraryView.swift`, line 13
+**实施方案**:
+- 移除 `import Combine`
+- 移除 `private var cancellables = Set<AnyCancellable>()`
+- 使用 `.onReceive` 修饰符替代 Combine 订阅
 
-**建议方案**:
-迁移到纯 async/await：
-
-```swift
-// 移除: private var cancellables = Set<AnyCancellable>()
-// 使用 AsyncSequence 替换通知订阅:
-
-.task {
-    for await _ in NotificationCenter.default.notifications(named: .bookImported) {
-        await viewModel.loadBooks()
-    }
-}
-```
+**修改文件**: `LibraryView.swift`
 
 ---
 
-### 14. 过度使用 @MainActor
+### 14. 过度使用 @MainActor ✅
+
+**状态**: 已确认无需修改 (commit `a7cc7bd`)
 
 **问题描述**:
-服务类不必要地标记 @MainActor（DatabaseService, PDFService 不需要主线程）。
+服务类可能不必要地标记 @MainActor。
 
-**影响位置**: DatabaseService, PDFService
-
-**建议方案**:
-仅 ViewModels 和 Views 使用 @MainActor；服务应该是线程安全的：
-
-```swift
-// 服务类应该是 nonisolated 的
-nonisolated final class DatabaseService {
-    static let shared = DatabaseService()
-
-    nonisolated private init() {}
-
-    // 无需 @MainActor - 通过 dbQueue 隔离实现线程安全
-    func fetchBooks() throws -> [Book] { ... }
-}
-```
+**实施结果**:
+- 检查确认 Core/ 下的服务类（DatabaseService, PDFService, BookService）均未使用 @MainActor
+- 服务通过各自的隔离机制实现线程安全（DatabaseQueue, 同步方法等）
+- 无需修改
 
 ---
 
-### 15. 不必要的 @unchecked Sendable
+### 15. 不必要的 @unchecked Sendable ✅
+
+**状态**: 已实施 (commit `8f9a0ac`)
 
 **问题描述**:
 `CoverImageCache` 标记为 `@unchecked Sendable`；NSCache 在 iOS 17+ 已经是 Sendable。
 
-**影响位置**: `LibraryView.swift`, line 194
+**实施方案**:
+- 保留 `@unchecked Sendable`（项目最低支持 iOS 16）
+- 添加注释说明原因和何时可以移除
 
-**建议方案**:
-移除 @unchecked 以提高清晰度，或添加编译条件：
-
-```swift
-#if swift(>=5.9)
-final class CoverImageCache: Sendable {
-#else
-final class CoverImageCache: @unchecked Sendable {
-#endif
-    private let cache = NSCache<NSString, UIImage>()
-    // ...
-}
-```
+**修改文件**: `LibraryView.swift`
 
 ---
 
 ## 总结
 
-### 按影响分类
+### 实施统计
 
-| 优先级 | 数量 | 涉及领域 |
-|--------|------|----------|
-| **高** | 5 | 性能（高亮刷新、PDF 提取）、状态管理、内存 |
-| **中** | 5 | 查询优化、缓存管理、视图同步 |
-| **低** | 5 | 代码质量、可维护性、配置 |
+| 优先级 | 总数 | 已实施 | 无需修改 |
+|--------|------|--------|----------|
+| **高** | 5 | 5 | 0 |
+| **中** | 5 | 4 | 1 (#8) |
+| **低** | 5 | 4 | 1 (#14) |
+| **合计** | 15 | 13 | 2 |
 
-### 建议实施顺序
+### 关键改进
 
-1. **修复高亮 CRUD 刷新** - 最大的用户体验影响
-2. **实现懒加载文本提取** - 防止大型 PDF 的内存问题
-3. **优化 PDF 注释清除** - 流畅的翻页体验
-4. **添加缓存内存压力处理** - 稳定性
-5. **改进书籍查询** - 书库加载速度
+1. **高亮操作性能**: 从 O(n) 全量刷新优化为 O(1) 增量更新
+2. **内存管理**: CoverImageCache 响应系统内存警告
+3. **状态管理**: 统一使用 SwiftUI 原生模式，移除 Combine 混用
+4. **代码组织**: 创建 StorageManager 和 PDFProcessingConfig 集中管理
+5. **数据库查询**: 支持真正的分页查询，减少内存占用
 
-### 实施注意事项
+### 向后兼容性
 
-- 所有更改都应保持与现有数据的向后兼容性
-- 建议逐个实施并测试，而非一次性全部更改
-- 高优先级项目可独立实施，无相互依赖
+- 所有更改保持与现有数据的完全兼容
+- 数据库无需迁移
+- API 签名变更仅影响内部调用
