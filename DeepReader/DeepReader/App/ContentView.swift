@@ -41,8 +41,12 @@ struct ContentView: View {
     }
     
     private func importPDF(from url: URL) async {
-        // TODO: Implement PDF import using BookService
-        print("Importing PDF from: \(url)")
+        do {
+            let book = try await BookService.shared.importPDF(from: url)
+            print("Successfully imported: \(book.title)")
+        } catch {
+            print("Import failed: \(error.localizedDescription)")
+        }
     }
 }
 
