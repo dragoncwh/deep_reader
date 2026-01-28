@@ -35,7 +35,10 @@ final class AppState: ObservableObject {
     }
     
     private func setupServices() {
-        // TODO: Initialize DatabaseService
-        // TODO: Initialize BookService
+        do {
+            try DatabaseService.shared.setup()
+        } catch {
+            print("Failed to initialize database: \(error.localizedDescription)")
+        }
     }
 }
