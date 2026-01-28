@@ -303,6 +303,12 @@ struct PDFKitView: UIViewRepresentable {
             if let page = document?.page(at: currentPage) {
                 pdfView.go(to: page)
             }
+        } else if let currentPDFPage = pdfView.currentPage,
+                  let currentPDFPageIndex = pdfView.document?.index(for: currentPDFPage),
+                  currentPDFPageIndex != currentPage,
+                  let targetPage = pdfView.document?.page(at: currentPage) {
+            // Navigate to the requested page (e.g., from outline or search)
+            pdfView.go(to: targetPage)
         }
     }
 
