@@ -89,6 +89,7 @@ DeepReader/DeepReader/
 
 - `BookCardView` - Book cover with title, author, progress bar (uses CoverImageCache)
 - `PDFKitView` - UIViewRepresentable wrapping PDFView with text selection and highlight tap detection
+  - **Navigation sync**: `updateUIView` must check if `currentPage` binding differs from PDFView's displayed page to handle programmatic navigation (outline, search, highlight list). Without this, only the page indicator updates while the PDF content doesn't scroll.
 - `SearchView` - Document text search interface (paginated results, 50 per page)
 - `SearchResultRow` - Individual search result row component
 - `OutlineView` - PDF table of contents navigation
