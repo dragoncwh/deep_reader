@@ -9,15 +9,23 @@ import XCTest
 import GRDB
 @testable import DeepReader
 
-/// Testable database service that uses an in-memory database
+/// Testable database service that uses a temporary file database
 /// Marked as Sendable to work with Swift 6 concurrency
 final class TestDatabaseService: @unchecked Sendable {
     private let dbQueue: DatabaseQueue
+    private let dbPath: String
 
     nonisolated init() throws {
-        // Create in-memory database
-        dbQueue = try DatabaseQueue()
+        // Create temporary file database to avoid memory management issues
+        let tempDir = FileManager.default.temporaryDirectory
+        dbPath = tempDir.appendingPathComponent("test-\(UUID().uuidString).sqlite").path
+        dbQueue = try DatabaseQueue(path: dbPath)
         try migrate()
+    }
+
+    deinit {
+        // Clean up temporary database file
+        try? FileManager.default.removeItem(atPath: dbPath)
     }
 
     private nonisolated func migrate() throws {
