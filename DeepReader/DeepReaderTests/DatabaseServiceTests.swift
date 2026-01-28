@@ -532,12 +532,12 @@ final class DatabaseServiceTests: XCTestCase {
         let pages = [
             (page: 0, text: "This is the introduction chapter"),
             (page: 1, text: "Swift is a powerful programming language"),
-            (page: 2, text: "SwiftUI provides declarative user interfaces")
+            (page: 2, text: "Learn Swift and build user interfaces")
         ]
 
         try database.storeTextContent(bookId: book.id!, pages: pages)
 
-        // Search for "Swift"
+        // Search for "Swift" - FTS5 matches whole words only
         let results = try database.searchText(query: "Swift")
         XCTAssertEqual(results.count, 2)
 
