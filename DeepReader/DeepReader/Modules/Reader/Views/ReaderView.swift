@@ -15,9 +15,6 @@ struct ReaderView: View {
     @State private var showingSearch = false
     @State private var showingOutline = false
     @State private var showingHighlights = false
-    @State private var currentSelection: PDFTextSelection?
-    @State private var showHighlightMenu = false
-    @State private var highlightMenuPosition: CGPoint = .zero
     @State private var showHighlightSuccess = false
     @State private var selectedHighlight: Highlight?
     @State private var showHighlightDetail = false
@@ -33,32 +30,20 @@ struct ReaderView: View {
             PDFKitView(
                 document: viewModel.document,
                 currentPage: $viewModel.currentPage,
-                onSelectionChanged: { selection in
-                    handleSelectionChanged(selection)
-                },
+                onSelectionChanged: nil,
                 onHighlightTapped: { tapInfo in
                     handleHighlightTapped(tapInfo)
+                },
+                onHighlightColorSelected: { color, selection in
+                    createHighlight(color: color, selection: selection)
                 }
             )
             .ignoresSafeArea(edges: .bottom)
-            
+
             // Overlay controls
             VStack {
                 Spacer()
                 pageIndicator
-            }
-
-            // Highlight menu overlay
-            if showHighlightMenu, currentSelection != nil {
-                HighlightMenuView(
-                    position: highlightMenuPosition,
-                    onColorSelected: { color in
-                        createHighlight(color: color)
-                    },
-                    onDismiss: {
-                        dismissHighlightMenu()
-                    }
-                )
             }
 
             // Success feedback overlay
@@ -167,26 +152,6 @@ struct ReaderView: View {
 
     // MARK: - Selection & Highlight Methods
 
-    private func handleSelectionChanged(_ selection: PDFTextSelection?) {
-        if let selection = selection {
-            currentSelection = selection
-            highlightMenuPosition = selection.menuPosition
-            withAnimation(.easeInOut(duration: 0.2)) {
-                showHighlightMenu = true
-            }
-        } else {
-            // Don't dismiss menu immediately when selection is cleared
-            // The menu will be dismissed when a color is selected or user taps outside
-        }
-    }
-
-    private func dismissHighlightMenu() {
-        withAnimation(.easeInOut(duration: 0.15)) {
-            showHighlightMenu = false
-        }
-        currentSelection = nil
-    }
-
     private func handleHighlightTapped(_ tapInfo: HighlightTapInfo) {
         // Find the highlight by ID
         if let highlight = viewModel.highlights.first(where: { $0.id == tapInfo.highlightId }) {
@@ -200,12 +165,8 @@ struct ReaderView: View {
         viewModel.goToPage(highlight.pageNumber)
     }
 
-    private func createHighlight(color: HighlightColor) {
-        guard let selection = currentSelection,
-              let bookId = book.id else {
-            dismissHighlightMenu()
-            return
-        }
+    private func createHighlight(color: HighlightColor, selection: PDFTextSelection) {
+        guard let bookId = book.id else { return }
 
         Task {
             await viewModel.createHighlight(
@@ -231,8 +192,6 @@ struct ReaderView: View {
                 showHighlightSuccess = false
             }
         }
-
-        dismissHighlightMenu()
     }
 }
 
@@ -253,15 +212,67 @@ struct HighlightTapInfo {
     let tapPosition: CGPoint
 }
 
+// MARK: - Custom PDFView with highlight options in system menu
+class HighlightablePDFView: PDFView {
+    var onHighlightColorSelected: ((HighlightColor) -> Void)?
+
+    override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
+        // Enable highlight actions when there's a selection
+        if action == #selector(highlightYellow) ||
+           action == #selector(highlightGreen) ||
+           action == #selector(highlightBlue) ||
+           action == #selector(highlightPink) ||
+           action == #selector(highlightPurple) {
+            return currentSelection != nil && currentSelection?.string?.isEmpty == false
+        }
+        return super.canPerformAction(action, withSender: sender)
+    }
+
+    override func buildMenu(with builder: any UIMenuBuilder) {
+        super.buildMenu(with: builder)
+
+        // Add highlight submenu
+        let highlightActions = [
+            UIAction(title: "Yellow", image: UIImage(systemName: "circle.fill")?.withTintColor(.systemYellow, renderingMode: .alwaysOriginal)) { [weak self] _ in
+                self?.onHighlightColorSelected?(.yellow)
+            },
+            UIAction(title: "Green", image: UIImage(systemName: "circle.fill")?.withTintColor(.systemGreen, renderingMode: .alwaysOriginal)) { [weak self] _ in
+                self?.onHighlightColorSelected?(.green)
+            },
+            UIAction(title: "Blue", image: UIImage(systemName: "circle.fill")?.withTintColor(.systemBlue, renderingMode: .alwaysOriginal)) { [weak self] _ in
+                self?.onHighlightColorSelected?(.blue)
+            },
+            UIAction(title: "Pink", image: UIImage(systemName: "circle.fill")?.withTintColor(.systemPink, renderingMode: .alwaysOriginal)) { [weak self] _ in
+                self?.onHighlightColorSelected?(.pink)
+            },
+            UIAction(title: "Purple", image: UIImage(systemName: "circle.fill")?.withTintColor(.systemPurple, renderingMode: .alwaysOriginal)) { [weak self] _ in
+                self?.onHighlightColorSelected?(.purple)
+            }
+        ]
+
+        let highlightMenu = UIMenu(title: "Highlight", image: UIImage(systemName: "highlighter"), children: highlightActions)
+
+        // Insert highlight menu after standardEdit (Copy, etc.) - position 3
+        builder.insertSibling(highlightMenu, afterMenu: .standardEdit)
+    }
+
+    @objc func highlightYellow() { onHighlightColorSelected?(.yellow) }
+    @objc func highlightGreen() { onHighlightColorSelected?(.green) }
+    @objc func highlightBlue() { onHighlightColorSelected?(.blue) }
+    @objc func highlightPink() { onHighlightColorSelected?(.pink) }
+    @objc func highlightPurple() { onHighlightColorSelected?(.purple) }
+}
+
 // MARK: - PDFKit SwiftUI Wrapper
 struct PDFKitView: UIViewRepresentable {
     let document: PDFDocument?
     @Binding var currentPage: Int
     var onSelectionChanged: ((PDFTextSelection?) -> Void)?
     var onHighlightTapped: ((HighlightTapInfo) -> Void)?
+    var onHighlightColorSelected: ((HighlightColor, PDFTextSelection) -> Void)?
 
     func makeUIView(context: Context) -> PDFView {
-        let pdfView = PDFView()
+        let pdfView = HighlightablePDFView()
         pdfView.autoScales = true
         pdfView.displayMode = .singlePageContinuous
         pdfView.displayDirection = .vertical
@@ -270,6 +281,51 @@ struct PDFKitView: UIViewRepresentable {
 
         // Enable text selection
         pdfView.isUserInteractionEnabled = true
+
+        // Set up highlight color selection callback
+        pdfView.onHighlightColorSelected = { [weak pdfView] color in
+            guard let pdfView = pdfView,
+                  let selection = pdfView.currentSelection,
+                  let text = selection.string,
+                  !text.isEmpty,
+                  let page = selection.pages.first,
+                  let document = pdfView.document else { return }
+
+            let pageIndex = document.index(for: page)
+
+            // Get bounds for each line of the selection
+            var bounds: [CGRect] = []
+            if let lineSelections = selection.selectionsByLine() as? [PDFSelection] {
+                for lineSelection in lineSelections {
+                    let rect = lineSelection.bounds(for: page)
+                    if !rect.isEmpty {
+                        bounds.append(rect)
+                    }
+                }
+            } else {
+                let rect = selection.bounds(for: page)
+                if !rect.isEmpty {
+                    bounds.append(rect)
+                }
+            }
+
+            guard !bounds.isEmpty else { return }
+
+            let textSelection = PDFTextSelection(
+                text: text,
+                page: page,
+                pageIndex: pageIndex,
+                bounds: bounds,
+                selection: selection,
+                menuPosition: .zero
+            )
+
+            DispatchQueue.main.async {
+                context.coordinator.parent.onHighlightColorSelected?(color, textSelection)
+                // Clear selection after highlighting
+                pdfView.clearSelection()
+            }
+        }
 
         // Set delegate for page change notifications
         NotificationCenter.default.addObserver(
@@ -327,9 +383,23 @@ struct PDFKitView: UIViewRepresentable {
             NotificationCenter.default.removeObserver(self)
         }
 
-        // Allow tap gesture to work alongside text selection
-        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
-            return true
+        // Only recognize tap if it's on a highlight annotation
+        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+            guard let pdfView = gestureRecognizer.view as? PDFView else { return false }
+
+            let viewLocation = touch.location(in: pdfView)
+
+            // Check if tap is on a highlight annotation
+            guard let page = pdfView.page(for: viewLocation, nearest: true) else { return false }
+            let pageLocation = pdfView.convert(viewLocation, to: page)
+
+            for annotation in page.annotations {
+                if annotation.type == "Highlight" && annotation.bounds.contains(pageLocation) {
+                    return true // Only handle taps on highlights
+                }
+            }
+
+            return false // Let other gestures (including menu dismiss) handle it
         }
 
         @objc func pageChanged(_ notification: Notification) {

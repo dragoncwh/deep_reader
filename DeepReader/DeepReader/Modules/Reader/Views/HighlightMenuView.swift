@@ -17,21 +17,14 @@ struct HighlightMenuView: View {
 
     var body: some View {
         GeometryReader { geometry in
-            ZStack {
-                // Tap outside to dismiss
-                Color.clear
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        onDismiss()
-                    }
-
-                // Menu content
-                highlightMenu
-                    .position(menuPosition(in: geometry))
-                    .opacity(isVisible ? 1 : 0)
-                    .scaleEffect(isVisible ? 1 : 0.8)
-            }
+            // Menu content only - no blocking overlay
+            // Menu dismisses when PDF selection changes (user taps elsewhere)
+            highlightMenu
+                .position(menuPosition(in: geometry))
+                .opacity(isVisible ? 1 : 0)
+                .scaleEffect(isVisible ? 1 : 0.8)
         }
+        .allowsHitTesting(true)
         .onAppear {
             withAnimation(.spring(response: 0.25, dampingFraction: 0.8)) {
                 isVisible = true
