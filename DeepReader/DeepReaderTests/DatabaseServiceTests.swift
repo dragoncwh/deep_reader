@@ -191,11 +191,11 @@ final class DatabaseServiceTests: XCTestCase {
 
     var database: TestDatabaseService!
 
-    override func setUp() async throws {
+    override func setUpWithError() throws {
         database = try TestDatabaseService()
     }
 
-    override func tearDown() async throws {
+    override func tearDownWithError() throws {
         database = nil
     }
 
