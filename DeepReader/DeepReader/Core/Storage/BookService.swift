@@ -19,14 +19,13 @@ final class BookService {
     
     /// Directory for storing imported PDFs
     private var booksDirectory: URL {
-        let docs = fileManager.urls(for: .documentDirectory, in: .userDomainMask)[0]
-        return docs.appendingPathComponent("Books", isDirectory: true)
+        StorageManager.Directory.books.url
     }
-    
+
     private init() {
         // Ensure books directory exists
         do {
-            try fileManager.createDirectory(at: booksDirectory, withIntermediateDirectories: true)
+            try StorageManager.ensureDirectoryExists(.books)
         } catch {
             Logger.shared.error("Failed to create books directory: \(error.localizedDescription)")
         }
@@ -44,7 +43,7 @@ final class BookService {
         
         // Copy to app's documents
         let fileName = sourceURL.lastPathComponent
-        let destinationURL = booksDirectory.appendingPathComponent(UUID().uuidString + "_" + fileName)
+        let destinationURL = StorageManager.url(for: .books, fileName: UUID().uuidString + "_" + fileName)
         
         try fileManager.copyItem(at: sourceURL, to: destinationURL)
         

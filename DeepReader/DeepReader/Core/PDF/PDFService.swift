@@ -183,12 +183,9 @@ final class PDFService {
     
     /// Save cover image to file
     func saveCover(_ image: UIImage, for bookId: Int64) throws -> String {
-        let coversDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("Covers", isDirectory: true)
-        
-        try FileManager.default.createDirectory(at: coversDir, withIntermediateDirectories: true)
-        
-        let coverPath = coversDir.appendingPathComponent("\(bookId).jpg")
+        try StorageManager.ensureDirectoryExists(.covers)
+
+        let coverPath = StorageManager.url(for: .covers, fileName: "\(bookId).jpg")
         guard let data = image.jpegData(compressionQuality: 0.8) else {
             throw PDFServiceError.coverSaveFailed
         }
