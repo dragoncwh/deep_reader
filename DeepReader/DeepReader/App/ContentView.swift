@@ -14,13 +14,30 @@ extension Notification.Name {
 
 struct ContentView: View {
     @EnvironmentObject var appState: AppState
-    
+    @State private var isImporting = false
+
     var body: some View {
         NavigationStack {
             LibraryView()
                 .navigationDestination(for: Book.self) { book in
                     ReaderView(book: book)
                 }
+        }
+        .overlay {
+            if isImporting {
+                ZStack {
+                    Color.black.opacity(0.3)
+                        .ignoresSafeArea()
+                    VStack(spacing: 16) {
+                        ProgressView()
+                            .scaleEffect(1.5)
+                        Text("Importing PDF...")
+                            .font(.headline)
+                    }
+                    .padding(24)
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
+                }
+            }
         }
         .fileImporter(
             isPresented: $appState.isShowingImporter,
@@ -35,6 +52,8 @@ struct ContentView: View {
         switch result {
         case .success(let urls):
             Task {
+                isImporting = true
+                defer { isImporting = false }
                 for url in urls {
                     await importPDF(from: url)
                 }
