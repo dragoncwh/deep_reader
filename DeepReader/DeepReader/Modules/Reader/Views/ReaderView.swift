@@ -678,12 +678,17 @@ final class ReaderViewModel: ObservableObject {
             return
         }
 
-        if url.startAccessingSecurityScopedResource() {
-            defer { url.stopAccessingSecurityScopedResource() }
-            document = PDFDocument(url: url)
-            if document == nil {
-                Logger.shared.error("Failed to load PDF document: \(book.filePath)")
+        // Try to access security-scoped resource (may return false for sandbox files)
+        let accessing = url.startAccessingSecurityScopedResource()
+        defer {
+            if accessing {
+                url.stopAccessingSecurityScopedResource()
             }
+        }
+
+        document = PDFDocument(url: url)
+        if document == nil {
+            Logger.shared.error("Failed to load PDF document: \(book.filePath)")
         }
 
         // Load highlights after document is loaded
