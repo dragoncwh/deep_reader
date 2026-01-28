@@ -266,21 +266,35 @@ struct OutlineItemView: View {
 @MainActor
 final class ReaderViewModel: ObservableObject {
     let book: Book
-    
+
     @Published var document: PDFDocument?
     @Published var currentPage: Int = 0
     @Published var searchResults: [PDFSelection] = []
     @Published var isLoading = false
-    
+
     private weak var pdfView: PDFView?
-    
+    private var cancellables = Set<AnyCancellable>()
+
     var pageCount: Int {
         document?.pageCount ?? 0
     }
-    
+
     init(book: Book) {
         self.book = book
         self.currentPage = book.lastReadPage
+        setupPageChangeObserver()
+    }
+
+    private func setupPageChangeObserver() {
+        $currentPage
+            .dropFirst()
+            .debounce(for: .seconds(1), scheduler: DispatchQueue.main)
+            .sink { [weak self] _ in
+                Task {
+                    await self?.saveProgress()
+                }
+            }
+            .store(in: &cancellables)
     }
     
     func loadDocument() async {
@@ -318,8 +332,12 @@ final class ReaderViewModel: ObservableObject {
     }
     
     func saveProgress() async {
-        // TODO: Save to DatabaseService
-        print("Saving progress: page \(currentPage)")
+        guard let bookId = book.id else { return }
+        do {
+            try BookService.shared.updateProgress(for: book, page: currentPage)
+        } catch {
+            print("Failed to save progress: \(error.localizedDescription)")
+        }
     }
 }
 

@@ -8,15 +8,37 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
+extension Notification.Name {
+    static let bookImported = Notification.Name("bookImported")
+}
+
 struct ContentView: View {
     @EnvironmentObject var appState: AppState
-    
+    @State private var isImporting = false
+    @State private var importError: String?
+
     var body: some View {
         NavigationStack {
             LibraryView()
                 .navigationDestination(for: Book.self) { book in
                     ReaderView(book: book)
                 }
+        }
+        .overlay {
+            if isImporting {
+                ZStack {
+                    Color.black.opacity(0.3)
+                        .ignoresSafeArea()
+                    VStack(spacing: 16) {
+                        ProgressView()
+                            .scaleEffect(1.5)
+                        Text("Importing PDF...")
+                            .font(.headline)
+                    }
+                    .padding(24)
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
+                }
+            }
         }
         .fileImporter(
             isPresented: $appState.isShowingImporter,
@@ -25,24 +47,39 @@ struct ContentView: View {
         ) { result in
             handleFileImport(result)
         }
+        .alert("Import Failed", isPresented: .init(
+            get: { importError != nil },
+            set: { if !$0 { importError = nil } }
+        )) {
+            Button("OK") { importError = nil }
+        } message: {
+            Text(importError ?? "")
+        }
     }
     
     private func handleFileImport(_ result: Result<[URL], Error>) {
         switch result {
         case .success(let urls):
             Task {
+                isImporting = true
+                defer { isImporting = false }
                 for url in urls {
                     await importPDF(from: url)
                 }
             }
         case .failure(let error):
-            print("Import failed: \(error.localizedDescription)")
+            importError = error.localizedDescription
         }
     }
-    
+
     private func importPDF(from url: URL) async {
-        // TODO: Implement PDF import using BookService
-        print("Importing PDF from: \(url)")
+        do {
+            let book = try await BookService.shared.importPDF(from: url)
+            print("Successfully imported: \(book.title)")
+            NotificationCenter.default.post(name: .bookImported, object: nil)
+        } catch {
+            importError = error.localizedDescription
+        }
     }
 }
 
