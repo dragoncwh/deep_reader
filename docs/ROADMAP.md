@@ -16,27 +16,31 @@
 
 ---
 
-## Phase 1: 完成基础流程 (MVP)
+## Phase 1: 完成基础流程 (MVP) ✅
 **目标**: 让 导入→书架→阅读→进度保存 完整跑通
 
-### 1.1 接通导入流程
-- [ ] `ContentView.importPDF()` 调用 `BookService.importPDF()`
-- [ ] 导入成功后刷新 LibraryView
-- [ ] 添加导入进度指示和错误提示
+> 详细任务拆解见 [PHASE1_TASKS.md](./PHASE1_TASKS.md)
 
-### 1.2 接通书架显示
-- [ ] `LibraryViewModel.loadBooks()` 调用 `DatabaseService.fetchBooks()`
-- [ ] 实现 `deleteBook()` 功能 (滑动删除)
-- [ ] 封面图片正确加载
+### 1.1 接通导入流程 ✅
+- [x] `ContentView.importPDF()` 调用 `BookService.importPDF()`
+- [x] 导入成功后刷新 LibraryView
+- [x] 添加导入进度指示和错误提示
 
-### 1.3 接通阅读进度
-- [ ] `ReaderViewModel.saveProgress()` 调用 `DatabaseService.updateReadingProgress()`
-- [ ] 打开书籍时恢复上次阅读位置
+### 1.2 接通书架显示 ✅
+- [x] `LibraryViewModel.loadBooks()` 调用 `DatabaseService.fetchBooks()`
+- [x] 实现 `deleteBook()` 功能 (滑动删除)
+- [x] 封面图片正确加载
+
+### 1.3 接通阅读进度 ✅
+- [x] `ReaderViewModel.saveProgress()` 调用 `DatabaseService.updateReadingProgress()`
+- [x] 打开书籍时恢复上次阅读位置
 
 ---
 
 ## Phase 2: 高亮与笔记
 **目标**: 用户可以高亮文本并添加笔记
+
+> 详细任务拆解见 [PHASE2_TASKS.md](./PHASE2_TASKS.md)
 
 ### 2.1 高亮创建
 - [ ] 长按/选中文本后显示高亮菜单
