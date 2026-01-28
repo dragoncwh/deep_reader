@@ -6,7 +6,7 @@
 //
 
 import SwiftUI
-import Combine
+import UIKit
 
 struct LibraryView: View {
     @EnvironmentObject var appState: AppState
@@ -56,6 +56,11 @@ struct LibraryView: View {
         }
         .task {
             await viewModel.loadBooks()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .bookImported)) { _ in
+            Task {
+                await viewModel.loadBooks()
+            }
         }
         .alert("Delete Book", isPresented: .init(
             get: { bookToDelete != nil },
@@ -191,12 +196,30 @@ struct BookCardView: View {
 }
 
 // MARK: - Cover Image Cache
+// Note: @unchecked Sendable is required because NSCache is not Sendable on iOS 16.
+// This can be removed when minimum deployment target is raised to iOS 17+.
 final class CoverImageCache: @unchecked Sendable {
     private let cache = NSCache<NSString, UIImage>()
 
     init() {
         // Limit cache to ~50 images
         cache.countLimit = 50
+
+        // Listen for memory warnings to clear cache
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleMemoryWarning),
+            name: UIApplication.didReceiveMemoryWarningNotification,
+            object: nil
+        )
+    }
+
+    deinit {
+        NotificationCenter.default.removeObserver(self)
+    }
+
+    @objc private func handleMemoryWarning() {
+        cache.removeAllObjects()
     }
 
     func image(forKey key: String) -> UIImage? {
@@ -219,18 +242,6 @@ final class LibraryViewModel: ObservableObject {
     @Published var isLoading = false
 
     let coverCache = CoverImageCache()
-    private var cancellables = Set<AnyCancellable>()
-
-    init() {
-        NotificationCenter.default.publisher(for: .bookImported)
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in
-                Task {
-                    await self?.loadBooks()
-                }
-            }
-            .store(in: &cancellables)
-    }
 
     func loadBooks() async {
         isLoading = true
