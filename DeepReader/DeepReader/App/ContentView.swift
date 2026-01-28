@@ -16,13 +16,21 @@ struct ContentView: View {
     @EnvironmentObject var appState: AppState
     @State private var isImporting = false
     @State private var importError: String?
+    @State private var navigationPath = NavigationPath()
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $navigationPath) {
             LibraryView()
                 .navigationDestination(for: Book.self) { book in
                     ReaderView(book: book)
                 }
+        }
+        .onChange(of: appState.selectedBook) { _, newBook in
+            // Navigate to book when selectedBook is set (e.g., from search results)
+            if let book = newBook {
+                navigationPath.append(book)
+                appState.selectedBook = nil
+            }
         }
         .overlay {
             if isImporting {

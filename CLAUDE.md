@@ -50,11 +50,14 @@ DeepReader/DeepReader/
 ├── Modules/
 │   ├── Library/Views/
 │   │   └── LibraryView.swift   # Library grid + LibraryViewModel + BookCardView + CoverImageCache
-│   └── Reader/Views/
-│       ├── ReaderView.swift    # PDF reader + HighlightablePDFView + PDFKitView + SearchView + OutlineView + ReaderViewModel
-│       ├── HighlightDetailView.swift # Highlight detail sheet (view/edit/delete)
-│       ├── HighlightListView.swift   # Highlight list grouped by page
-│       └── NoteEditorView.swift      # Note editor for highlights
+│   ├── Reader/Views/
+│   │   ├── ReaderView.swift    # PDF reader + HighlightablePDFView + PDFKitView + SearchView + OutlineView + ReaderViewModel
+│   │   ├── HighlightDetailView.swift # Highlight detail sheet (view/edit/delete)
+│   │   ├── HighlightListView.swift   # Highlight list grouped by page
+│   │   └── NoteEditorView.swift      # Note editor for highlights
+│   └── Search/Views/
+│       ├── GlobalSearchResultsView.swift # Global search results across all books
+│       └── GlobalSearchResultRow.swift   # Search result row with highlighted keywords
 ├── Core/
 │   ├── Logger/
 │   │   └── Logger.swift        # Centralized logging service (OSLog)
@@ -62,7 +65,8 @@ DeepReader/DeepReader/
 │   │   ├── DatabaseService.swift
 │   │   └── BookService.swift
 │   └── PDF/
-│       └── PDFService.swift
+│       ├── PDFService.swift
+│       └── OCRService.swift    # Background OCR processing for scanned PDFs
 └── Shared/DesignSystem/
     └── DesignSystem.swift
 ```
@@ -72,6 +76,7 @@ DeepReader/DeepReader/
 - `DatabaseService.shared` - SQLite via GRDB, handles migrations, text search (FTS5 with bm25 ranking), highlights
 - `PDFService.shared` - PDF loading, text extraction (with batching & progress), OCR (Vision), cover generation
 - `BookService.shared` - PDF import, book CRUD, security-scoped file handling
+- `OCRService.shared` - Background OCR processing queue for scanned PDFs (uses Vision framework)
 - `Logger.shared` - Centralized logging using OSLog (debug/info/warning/error levels)
 
 ### ViewModels
@@ -98,6 +103,8 @@ DeepReader/DeepReader/
 - `HighlightDetailView` - Detail sheet for viewing/editing/deleting highlights (uses `sheet(item:)` pattern)
 - `HighlightListView` - List of all highlights grouped by page number (uses `contentShape(Rectangle())` for full row tap area)
 - `NoteEditorView` - Text editor for highlight notes
+- `GlobalSearchResultsView` - Global search across all books with loading/empty states
+- `GlobalSearchResultRow` - Search result row displaying book title, page, and snippet with highlighted keywords (parses `<b>` tags)
 
 ### Database
 

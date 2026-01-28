@@ -28,12 +28,14 @@ struct DeepReaderApp: App {
 final class AppState: ObservableObject {
     @Published var selectedBook: Book?
     @Published var isShowingImporter = false
-    
+    /// Initial page to navigate to when opening a book (e.g., from search results)
+    @Published var initialPage: Int?
+
     init() {
         // Initialize database and services
         setupServices()
     }
-    
+
     private func setupServices() {
         do {
             try DatabaseService.shared.setup()

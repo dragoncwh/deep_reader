@@ -11,6 +11,7 @@ import Combine
 
 struct ReaderView: View {
     let book: Book
+    @EnvironmentObject var appState: AppState
     @StateObject private var viewModel: ReaderViewModel
     @State private var showingSearch = false
     @State private var showingOutline = false
@@ -123,6 +124,11 @@ struct ReaderView: View {
         }
         .task {
             await viewModel.loadDocument()
+            // Navigate to initial page if set (e.g., from search results)
+            if let initialPage = appState.initialPage {
+                viewModel.goToPage(initialPage)
+                appState.initialPage = nil
+            }
         }
         .onDisappear {
             viewModel.cleanup()
@@ -987,5 +993,6 @@ final class ReaderViewModel: ObservableObject {
             lastReadPage: 0,
             coverImagePath: nil
         ))
+        .environmentObject(AppState())
     }
 }

@@ -140,6 +140,13 @@ final class DatabaseService {
             try db.create(index: "idx_text_content_bookId", on: "text_content", columns: ["bookId"])
         }
 
+        // Add OCR flag for scanned PDFs
+        migrator.registerMigration("v4_ocr_flag") { db in
+            try db.alter(table: "books") { t in
+                t.add(column: "needsOCR", .boolean).notNull().defaults(to: false)
+            }
+        }
+
         try migrator.migrate(dbQueue)
     }
     
@@ -192,7 +199,14 @@ final class DatabaseService {
             )
         }
     }
-    
+
+    /// Fetch a single book by ID
+    func fetchBook(id: Int64) throws -> Book? {
+        try queue().read { db in
+            try Book.fetchOne(db, key: id)
+        }
+    }
+
     // MARK: - Highlights
 
     /// Fetch highlights for a book
@@ -314,6 +328,40 @@ final class DatabaseService {
             }
 
             return (total, results)
+        }
+    }
+
+    /// Full-text search across all books with book info and relevance ranking
+    /// - Parameter query: Search query (supports FTS5 syntax)
+    /// - Returns: SearchResult array sorted by relevance (bm25 score)
+    func searchTextWithBookInfo(query: String) throws -> [SearchResult] {
+        guard !query.isEmpty else { return [] }
+
+        return try queue().read { db in
+            let rows = try Row.fetchAll(db, sql: """
+                SELECT
+                    tc.bookId,
+                    b.title as bookTitle,
+                    tc.pageNumber,
+                    snippet(text_content_fts, 0, '<b>', '</b>', '...', 32) as snippet,
+                    bm25(text_content_fts) as rank
+                FROM text_content_fts
+                JOIN text_content tc ON tc.id = text_content_fts.rowid
+                JOIN books b ON b.id = tc.bookId
+                WHERE text_content_fts MATCH ?
+                ORDER BY rank
+                LIMIT 100
+            """, arguments: [query])
+
+            return rows.map { row in
+                SearchResult(
+                    bookId: row["bookId"] as Int64,
+                    bookTitle: row["bookTitle"] as String,
+                    pageNumber: row["pageNumber"] as Int,
+                    snippet: row["snippet"] as String,
+                    rank: row["rank"] as Double
+                )
+            }
         }
     }
 }

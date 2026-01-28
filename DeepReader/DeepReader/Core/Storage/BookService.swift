@@ -64,7 +64,11 @@ final class BookService {
         // Get file size
         let attributes = try fileManager.attributesOfItem(atPath: destinationURL.path)
         let fileSize = attributes[.size] as? Int64 ?? 0
-        
+
+        // Check if PDF needs OCR (is a scanned document)
+        let needsOCR = pdfService.isScannedPDF(document)
+        Logger.shared.info("PDF '\(title)' needsOCR: \(needsOCR)")
+
         // Create book record
         var book = Book(
             id: nil,
@@ -76,7 +80,8 @@ final class BookService {
             addedAt: Date(),
             lastOpenedAt: nil,
             lastReadPage: 0,
-            coverImagePath: nil
+            coverImagePath: nil,
+            needsOCR: needsOCR
         )
         
         // Save to database

@@ -103,6 +103,13 @@ final class TestDatabaseService: @unchecked Sendable {
             try db.create(index: "idx_text_content_bookId", on: "text_content", columns: ["bookId"])
         }
 
+        // Add OCR flag for scanned PDFs
+        migrator.registerMigration("v4_ocr_flag") { db in
+            try db.alter(table: "books") { t in
+                t.add(column: "needsOCR", .boolean).notNull().defaults(to: false)
+            }
+        }
+
         try migrator.migrate(dbQueue)
     }
 

@@ -22,6 +22,7 @@ struct Book: Identifiable, Hashable, Codable, FetchableRecord, MutablePersistabl
     var lastOpenedAt: Date?
     var lastReadPage: Int
     var coverImagePath: String?
+    var needsOCR: Bool = false
 
     mutating func didInsert(_ inserted: InsertionSuccess) {
         id = inserted.rowID

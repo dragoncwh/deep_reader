@@ -195,10 +195,50 @@ final class PDFService {
     }
     
     // MARK: - Search
-    
+
     /// Search for text in document
     func search(query: String, in document: PDFDocument, options: NSString.CompareOptions = .caseInsensitive) -> [PDFSelection] {
         return document.findString(query, withOptions: options)
+    }
+
+    // MARK: - Scanned PDF Detection
+
+    /// Minimum characters required for a page to be considered as having text
+    private static let minimumTextCharacters = 10
+
+    /// Check if a PDF is a scanned document (needs OCR)
+    /// - Parameters:
+    ///   - document: The PDF document to check
+    ///   - samplePages: Number of pages to sample (default 5)
+    /// - Returns: true if the PDF appears to be scanned (no text layer)
+    func isScannedPDF(_ document: PDFDocument, samplePages: Int = 5) -> Bool {
+        let pageCount = document.pageCount
+        guard pageCount > 0 else {
+            Logger.shared.warning("PDF has no pages, cannot determine if scanned")
+            return false
+        }
+
+        // Sample first N pages or all pages if fewer
+        let pagesToCheck = min(samplePages, pageCount)
+        var pagesWithoutText = 0
+
+        for i in 0..<pagesToCheck {
+            guard let page = document.page(at: i) else { continue }
+
+            let text = page.string ?? ""
+            let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
+
+            if trimmedText.count < Self.minimumTextCharacters {
+                pagesWithoutText += 1
+            }
+        }
+
+        // Consider it scanned if majority of sampled pages have no text
+        let isScanned = pagesWithoutText > pagesToCheck / 2
+
+        Logger.shared.info("Scanned PDF check: \(pagesWithoutText)/\(pagesToCheck) pages without text, isScanned=\(isScanned)")
+
+        return isScanned
     }
 }
 

@@ -7,44 +7,29 @@
 
 import SwiftUI
 import UIKit
+import Combine
 
 struct LibraryView: View {
     @EnvironmentObject var appState: AppState
     @StateObject private var viewModel = LibraryViewModel()
+    @ObservedObject private var ocrService = OCRService.shared
     @State private var bookToDelete: Book?
+    @State private var searchText: String = ""
 
     private let columns = [
         GridItem(.adaptive(minimum: 160, maximum: 200), spacing: 16)
     ]
 
     var body: some View {
-        ScrollView {
-            if viewModel.isLoading {
-                ProgressView("Loading...")
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .padding(.top, 100)
-            } else if viewModel.books.isEmpty {
-                emptyStateView
+        Group {
+            if searchText.isEmpty {
+                libraryContentView
             } else {
-                LazyVGrid(columns: columns, spacing: 20) {
-                    ForEach(viewModel.books) { book in
-                        NavigationLink(value: book) {
-                            BookCardView(book: book, coverCache: viewModel.coverCache)
-                        }
-                        .buttonStyle(.plain)
-                        .contextMenu {
-                            Button(role: .destructive) {
-                                bookToDelete = book
-                            } label: {
-                                Label("Delete", systemImage: "trash")
-                            }
-                        }
-                    }
-                }
-                .padding()
+                globalSearchResultsView
             }
         }
         .navigationTitle("Library")
+        .searchable(text: $searchText, prompt: "Search books and content")
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button {
@@ -87,14 +72,14 @@ struct LibraryView: View {
             Image(systemName: "book.closed")
                 .font(.system(size: 60))
                 .foregroundStyle(.secondary)
-            
+
             Text("No Books Yet")
                 .font(.title2)
                 .fontWeight(.semibold)
-            
+
             Text("Tap + to add your first PDF")
                 .foregroundStyle(.secondary)
-            
+
             Button {
                 appState.isShowingImporter = true
             } label: {
@@ -107,28 +92,110 @@ struct LibraryView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(.top, 100)
     }
+
+    private var libraryContentView: some View {
+        ScrollView {
+            if viewModel.isLoading {
+                ProgressView("Loading...")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .padding(.top, 100)
+            } else if viewModel.books.isEmpty {
+                emptyStateView
+            } else {
+                LazyVGrid(columns: columns, spacing: 20) {
+                    ForEach(viewModel.books) { book in
+                        NavigationLink(value: book) {
+                            BookCardView(
+                                book: book,
+                                coverCache: viewModel.coverCache,
+                                needsOCR: book.needsOCR,
+                                ocrProgress: book.id.flatMap { ocrService.ocrProgress[$0] }
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        .contextMenu {
+                            if book.needsOCR {
+                                Button {
+                                    ocrService.processBook(book)
+                                } label: {
+                                    Label("Process Scanned PDF", systemImage: "doc.viewfinder")
+                                }
+                            }
+
+                            Button(role: .destructive) {
+                                bookToDelete = book
+                            } label: {
+                                Label("Delete", systemImage: "trash")
+                            }
+                        }
+                    }
+                }
+                .padding()
+            }
+        }
+    }
+
+    // Global search results view
+    private var globalSearchResultsView: some View {
+        GlobalSearchResultsView(
+            searchText: searchText,
+            onResultTapped: { result in
+                navigateToSearchResult(result)
+            }
+        )
+    }
+
+    /// Navigate to a book at a specific page from a search result
+    private func navigateToSearchResult(_ result: SearchResult) {
+        do {
+            // Fetch the book by ID
+            guard let book = try DatabaseService.shared.fetchBook(id: result.bookId) else {
+                Logger.shared.error("Book not found for search result: \(result.bookId)")
+                return
+            }
+
+            // Set the initial page to navigate to
+            appState.initialPage = result.pageNumber
+
+            // Clear search text to dismiss search interface
+            searchText = ""
+
+            // Navigate to the book using NavigationLink's value-based navigation
+            // The navigationPath is managed by ContentView's NavigationStack
+            appState.selectedBook = book
+        } catch {
+            Logger.shared.error("Failed to fetch book for navigation: \(error.localizedDescription)")
+        }
+    }
 }
 
 // MARK: - Book Card View
 struct BookCardView: View {
     let book: Book
     let coverCache: CoverImageCache
+    var needsOCR: Bool = false
+    var ocrProgress: Double? = nil
     @State private var coverImage: UIImage?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             // Cover image
-            ZStack {
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(Color.secondary.opacity(0.2))
+            ZStack(alignment: .topTrailing) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(Color.secondary.opacity(0.2))
 
-                if let image = coverImage {
-                    Image(uiImage: image)
-                        .resizable()
-                        .aspectRatio(contentMode: .fill)
-                } else {
-                    coverPlaceholder
+                    if let image = coverImage {
+                        Image(uiImage: image)
+                            .resizable()
+                            .aspectRatio(contentMode: .fill)
+                    } else {
+                        coverPlaceholder
+                    }
                 }
+
+                // OCR status badge
+                ocrStatusBadge
             }
             .frame(height: 200)
             .clipShape(RoundedRectangle(cornerRadius: 8))
@@ -169,6 +236,42 @@ struct BookCardView: View {
             Text("PDF")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+        }
+    }
+
+    /// OCR status badge overlay
+    @ViewBuilder
+    private var ocrStatusBadge: some View {
+        if let progress = ocrProgress {
+            // OCR in progress - show circular progress indicator
+            ZStack {
+                Circle()
+                    .fill(.ultraThinMaterial)
+                    .frame(width: 32, height: 32)
+
+                Circle()
+                    .stroke(Color.secondary.opacity(0.3), lineWidth: 3)
+                    .frame(width: 24, height: 24)
+
+                Circle()
+                    .trim(from: 0, to: progress)
+                    .stroke(Color.accentColor, style: StrokeStyle(lineWidth: 3, lineCap: .round))
+                    .frame(width: 24, height: 24)
+                    .rotationEffect(.degrees(-90))
+            }
+            .padding(Spacing.sm)
+        } else if needsOCR {
+            // Needs OCR - show scan icon badge
+            ZStack {
+                Circle()
+                    .fill(.ultraThinMaterial)
+                    .frame(width: 32, height: 32)
+
+                Image(systemName: "doc.viewfinder")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(Spacing.sm)
         }
     }
 

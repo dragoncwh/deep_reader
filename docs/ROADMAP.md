@@ -4,12 +4,13 @@
 
 ### 已完成 ✅
 - **数据层**: GRDB + SQLite + FTS5 全文搜索
-- **Models**: Book, Highlight (含GRDB协议)
-- **Services**: DatabaseService, PDFService, BookService
+- **Models**: Book, Highlight, SearchResult (含GRDB协议)
+- **Services**: DatabaseService, PDFService, BookService, OCRService
 - **基础UI**: LibraryView (网格布局), ReaderView (PDFKit包装)
 - **Design System**: Typography, Spacing, Colors, Components
 - **Phase 1**: 完整的 导入→书架→阅读→进度保存 流程
 - **Phase 2**: 高亮与笔记功能 (创建、显示、管理)
+- **Phase 3**: 全局搜索 + OCR 扫描件支持
 
 ---
 
@@ -55,18 +56,25 @@
 
 ---
 
-## Phase 3: 全局搜索
+## Phase 3: 全局搜索 ✅
 **目标**: 跨书籍搜索，支持扫描件OCR
 
-### 3.1 全局搜索UI
-- [ ] 书架页添加搜索栏
-- [ ] 搜索结果列表 (显示书名、页码、匹配片段)
-- [ ] 点击结果跳转到对应位置
+> 详细任务拆解见 [PHASE3_TASKS.md](./PHASE3_TASKS.md)
 
-### 3.2 OCR增强
-- [ ] 检测PDF是否为扫描件 (无文本层)
-- [ ] 触发OCR处理并索引
-- [ ] OCR进度显示
+### 3.1 全局搜索UI ✅
+- [x] 书架页添加搜索栏
+- [x] 搜索结果列表 (显示书名、页码、匹配片段)
+- [x] 点击结果跳转到对应位置
+- [x] 搜索防抖 (300ms)
+
+### 3.2 OCR增强 ✅
+- [x] 检测PDF是否为扫描件 (无文本层)
+- [x] 导入时自动标记扫描件
+- [x] OCR处理队列 (OCRService)
+- [x] OCR进度显示
+- [x] 书架显示OCR状态徽章
+- [x] 手动触发OCR (长按菜单)
+- [x] OCR错误处理与重试
 
 ---
 
@@ -112,7 +120,21 @@
 - [ ] 文本提取后台队列
 - [ ] 内存优化
 
-### 6.2 用户体验
+### 6.2 大型书籍库优化 (几百本书场景)
+- [ ] 书架分页加载 (一次加载50本，滚动加载更多)
+- [ ] 文本存储优化 (压缩或按需提取)
+- [ ] FTS5索引优化 (external content模式)
+- [ ] 数据库定期VACUUM压缩
+
+> **问题背景**: 当前实现每本书会在数据库存储完整文本用于搜索。
+> 假设200本书，平均200页/本，每页2KB文本：
+> - 文本数据: ~80 MB
+> - FTS5索引: ~160-240 MB
+> - 总额外存储: ~200-300 MB (不含PDF本身)
+>
+> 当前设计对几百本书可接受，但1000+本书需要优化。
+
+### 6.3 用户体验
 - [ ] 深色模式支持
 - [ ] 阅读设置 (字体、亮度)
 - [ ] iPad适配
@@ -125,7 +147,7 @@
 |------|--------|------|------|
 | Phase 1 | 🔴 必须 | ✅ 完成 | 基础流程不通，无法使用 |
 | Phase 2 | 🟠 高 | ✅ 完成 | 学习型阅读器的基本功能 |
-| Phase 3 | 🟡 中 | 待开发 | 提升可用性 |
+| Phase 3 | 🟡 中 | ✅ 完成 | 提升可用性 |
 | Phase 4 | 🔴 必须 | 待开发 | 产品核心差异化 |
 | Phase 5 | 🟠 高 | 待开发 | 用户信任的基础 |
 | Phase 6 | 🟡 中 | 待开发 | 上线前打磨 |
@@ -136,14 +158,16 @@
 
 **已完成模块:**
 - `ContentView.swift` - PDF导入 ✅
-- `LibraryView.swift` - 书架显示 ✅
+- `LibraryView.swift` - 书架显示、全局搜索 ✅
 - `ReaderView.swift` - 阅读器、高亮功能 ✅
-- `HighlightMenuView.swift` - 高亮颜色菜单 ✅
 - `HighlightDetailView.swift` - 高亮详情 ✅
 - `HighlightListView.swift` - 高亮列表 ✅
 - `NoteEditorView.swift` - 笔记编辑器 ✅
+- `Modules/Search/Views/GlobalSearchResultsView.swift` - 全局搜索结果 ✅
+- `Modules/Search/Views/GlobalSearchResultRow.swift` - 搜索结果行 ✅
+- `Models/SearchResult.swift` - 搜索结果模型 ✅
+- `Core/PDF/OCRService.swift` - OCR处理服务 ✅
 
 **需新增:**
 - `Modules/AI/` - AI服务和对话UI
-- `Modules/Search/` - 全局搜索UI
 - `Modules/Settings/` - 设置页面
