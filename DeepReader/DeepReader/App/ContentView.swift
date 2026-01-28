@@ -15,6 +15,7 @@ extension Notification.Name {
 struct ContentView: View {
     @EnvironmentObject var appState: AppState
     @State private var isImporting = false
+    @State private var importError: String?
 
     var body: some View {
         NavigationStack {
@@ -46,6 +47,14 @@ struct ContentView: View {
         ) { result in
             handleFileImport(result)
         }
+        .alert("Import Failed", isPresented: .init(
+            get: { importError != nil },
+            set: { if !$0 { importError = nil } }
+        )) {
+            Button("OK") { importError = nil }
+        } message: {
+            Text(importError ?? "")
+        }
     }
     
     private func handleFileImport(_ result: Result<[URL], Error>) {
@@ -59,17 +68,17 @@ struct ContentView: View {
                 }
             }
         case .failure(let error):
-            print("Import failed: \(error.localizedDescription)")
+            importError = error.localizedDescription
         }
     }
-    
+
     private func importPDF(from url: URL) async {
         do {
             let book = try await BookService.shared.importPDF(from: url)
             print("Successfully imported: \(book.title)")
             NotificationCenter.default.post(name: .bookImported, object: nil)
         } catch {
-            print("Import failed: \(error.localizedDescription)")
+            importError = error.localizedDescription
         }
     }
 }
