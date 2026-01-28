@@ -51,7 +51,11 @@ DeepReader/DeepReader/
 │   ├── Library/Views/
 │   │   └── LibraryView.swift   # Library grid + LibraryViewModel + BookCardView + CoverImageCache
 │   └── Reader/Views/
-│       └── ReaderView.swift    # PDF reader + PDFKitView + SearchView + SearchResultRow + OutlineView + ReaderViewModel
+│       ├── ReaderView.swift    # PDF reader + PDFKitView + SearchView + SearchResultRow + OutlineView + ReaderViewModel
+│       ├── HighlightMenuView.swift   # Floating color picker for creating highlights
+│       ├── HighlightDetailView.swift # Highlight detail sheet (view/edit/delete)
+│       ├── HighlightListView.swift   # Highlight list grouped by page
+│       └── NoteEditorView.swift      # Note editor for highlights
 ├── Core/
 │   ├── Logger/
 │   │   └── Logger.swift        # Centralized logging service (OSLog)
@@ -75,16 +79,24 @@ DeepReader/DeepReader/
 
 - `AppState` (in DeepReaderApp.swift) - App-wide state: `selectedBook`, `isShowingImporter`
 - `LibraryViewModel` (in LibraryView.swift) - Book list management
-- `ReaderViewModel` (in ReaderView.swift) - PDF document state, search, navigation
+- `ReaderViewModel` (in ReaderView.swift) - PDF document state, search, navigation, highlights
+  - `highlights: [Highlight]` - All highlights for current book
+  - `highlightsByPage: [Int: [Highlight]]` - Highlights grouped by page
+  - `createHighlight()`, `deleteHighlight()`, `updateHighlight()` - CRUD operations
+  - `loadHighlights()`, `applyHighlightAnnotations()` - Load and render highlights
 
 ### UI Components
 
 - `BookCardView` - Book cover with title, author, progress bar (uses CoverImageCache)
-- `PDFKitView` - UIViewRepresentable wrapping PDFView
+- `PDFKitView` - UIViewRepresentable wrapping PDFView with text selection and highlight tap detection
 - `SearchView` - Document text search interface (paginated results, 50 per page)
 - `SearchResultRow` - Individual search result row component
 - `OutlineView` - PDF table of contents navigation
 - `CoverImageCache` - NSCache-based image caching (limit: 50 images)
+- `HighlightMenuView` - Floating color picker menu shown when text is selected
+- `HighlightDetailView` - Detail sheet for viewing/editing/deleting highlights
+- `HighlightListView` - List of all highlights grouped by page number
+- `NoteEditorView` - Text editor for highlight notes
 
 ### Database
 
@@ -165,6 +177,11 @@ Some features are stubbed or need improvement:
 - `AppState.setupServices()` - Service initialization
 - Mixed state management in LibraryView (Combine + async/await) - consider unifying
 - ViewModel tests disabled due to Swift 6 @MainActor deallocation issues
+
+## Completed Features
+
+- **Phase 1**: PDF import, library display, reading progress persistence
+- **Phase 2**: Highlight creation (5 colors), highlight rendering (PDFAnnotation), highlight management (list, edit, delete), notes
 
 ## Logging
 
