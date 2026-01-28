@@ -199,6 +199,7 @@ private struct HighlightRowView: View {
                     .foregroundStyle(.tertiary)
             }
             .padding(.vertical, Spacing.xs)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }
