@@ -8,11 +8,8 @@
 - **Services**: DatabaseService, PDFService, BookService
 - **基础UI**: LibraryView (网格布局), ReaderView (PDFKit包装)
 - **Design System**: Typography, Spacing, Colors, Components
-
-### 待连接 (代码存在但未接通)
-- `LibraryView.loadBooks()` → 未调用 DatabaseService
-- `ContentView.importPDF()` → 未调用 BookService
-- `ReaderView.saveProgress()` → 未保存到数据库
+- **Phase 1**: 完整的 导入→书架→阅读→进度保存 流程
+- **Phase 2**: 高亮与笔记功能 (创建、显示、管理)
 
 ---
 
@@ -37,24 +34,24 @@
 
 ---
 
-## Phase 2: 高亮与笔记
+## Phase 2: 高亮与笔记 ✅
 **目标**: 用户可以高亮文本并添加笔记
 
 > 详细任务拆解见 [PHASE2_TASKS.md](./PHASE2_TASKS.md)
 
-### 2.1 高亮创建
-- [ ] 长按/选中文本后显示高亮菜单
-- [ ] 支持5种高亮颜色选择
-- [ ] 保存高亮到数据库
+### 2.1 高亮创建 ✅
+- [x] 长按/选中文本后显示高亮菜单
+- [x] 支持5种高亮颜色选择
+- [x] 保存高亮到数据库
 
-### 2.2 高亮显示
-- [ ] 在PDF页面上渲染已有高亮
-- [ ] 点击高亮显示详情/笔记
+### 2.2 高亮显示 ✅
+- [x] 在PDF页面上渲染已有高亮 (PDFAnnotation)
+- [x] 点击高亮显示详情/笔记
 
-### 2.3 高亮管理
-- [ ] 高亮列表视图 (按书籍/按页面)
-- [ ] 删除高亮
-- [ ] 编辑笔记
+### 2.3 高亮管理 ✅
+- [x] 高亮列表视图 (按页码分组)
+- [x] 删除高亮
+- [x] 编辑笔记
 
 ---
 
@@ -124,23 +121,27 @@
 
 ## 建议优先级
 
-| 阶段 | 优先级 | 原因 |
-|------|--------|------|
-| Phase 1 | 🔴 必须 | 基础流程不通，无法使用 |
-| Phase 2 | 🟠 高 | 学习型阅读器的基本功能 |
-| Phase 3 | 🟡 中 | 提升可用性 |
-| Phase 4 | 🔴 必须 | 产品核心差异化 |
-| Phase 5 | 🟠 高 | 用户信任的基础 |
-| Phase 6 | 🟡 中 | 上线前打磨 |
+| 阶段 | 优先级 | 状态 | 原因 |
+|------|--------|------|------|
+| Phase 1 | 🔴 必须 | ✅ 完成 | 基础流程不通，无法使用 |
+| Phase 2 | 🟠 高 | ✅ 完成 | 学习型阅读器的基本功能 |
+| Phase 3 | 🟡 中 | 待开发 | 提升可用性 |
+| Phase 4 | 🔴 必须 | 待开发 | 产品核心差异化 |
+| Phase 5 | 🟠 高 | 待开发 | 用户信任的基础 |
+| Phase 6 | 🟡 中 | 待开发 | 上线前打磨 |
 
 ---
 
 ## 关键文件
 
-**需修改:**
-- `ContentView.swift` - 接通导入
-- `LibraryView.swift` - 接通书架
-- `ReaderView.swift` - 接通进度、添加高亮
+**已完成模块:**
+- `ContentView.swift` - PDF导入 ✅
+- `LibraryView.swift` - 书架显示 ✅
+- `ReaderView.swift` - 阅读器、高亮功能 ✅
+- `HighlightMenuView.swift` - 高亮颜色菜单 ✅
+- `HighlightDetailView.swift` - 高亮详情 ✅
+- `HighlightListView.swift` - 高亮列表 ✅
+- `NoteEditorView.swift` - 笔记编辑器 ✅
 
 **需新增:**
 - `Modules/AI/` - AI服务和对话UI
